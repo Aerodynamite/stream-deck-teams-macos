@@ -1,0 +1,118 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"Name": "Teams Reactions",
+	"Version": "0.1.0.0",
+	"Author": "Laurens Bolle",
+	"Actions": [
+		{
+			"Name": "Like",
+			"UUID": "com.laurens-bolle.teams-reactions.like",
+			"Icon": "imgs/actions/like/icon",
+			"Tooltip": "Send a Like reaction in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/like/key",
+					"Title": "Like",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Love",
+			"UUID": "com.laurens-bolle.teams-reactions.love",
+			"Icon": "imgs/actions/love/icon",
+			"Tooltip": "Send a Love reaction in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/love/key",
+					"Title": "Love",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Applause",
+			"UUID": "com.laurens-bolle.teams-reactions.applause",
+			"Icon": "imgs/actions/applause/icon",
+			"Tooltip": "Send an Applause reaction in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/applause/key",
+					"Title": "Applause",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Laugh",
+			"UUID": "com.laurens-bolle.teams-reactions.laugh",
+			"Icon": "imgs/actions/laugh/icon",
+			"Tooltip": "Send a Laugh reaction in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/laugh/key",
+					"Title": "Laugh",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Surprise",
+			"UUID": "com.laurens-bolle.teams-reactions.surprise",
+			"Icon": "imgs/actions/surprise/icon",
+			"Tooltip": "Send a Surprise reaction in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/surprise/key",
+					"Title": "Surprise",
+					"ShowTitle": false
+				}
+			]
+		}
+	],
+	"Category": "Teams Reactions",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"CodePath": "bin/plugin.js",
+	"Description": "Send Microsoft Teams meeting reactions from Stream Deck on macOS.",
+	"Icon": "imgs/plugin/marketplace",
+	"ApplicationsToMonitor": {
+		"mac": [
+			"com.microsoft.teams2"
+		]
+	},
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "13"
+		}
+	],
+	"Nodejs": {
+		"Version": "24",
+		"Debug": "enabled"
+	},
+	"UUID": "com.laurens-bolle.teams-reactions"
+}

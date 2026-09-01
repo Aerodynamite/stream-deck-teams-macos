@@ -1,0 +1,31 @@
+{
+    "scripts": {
+        "build": "npm run build:native && npm run build:node",
+        "build:icons": "./scripts/build-icons.sh",
+        "build:native": "./scripts/build-native.sh",
+        "build:node": "tsc --outDir .build-ts --sourceMap false && rollup -c",
+        "typecheck": "tsc --noEmit",
+        "test": "npm run test:native && npm run test:unit && npm run typecheck",
+        "test:native": "../test.sh",
+        "test:unit": "node --test tests/*.test.mjs",
+        "validate": "streamdeck validate com.laurens-bolle.teams-reactions.sdPlugin --no-update-check",
+        "pack": "npm run build && streamdeck pack com.laurens-bolle.teams-reactions.sdPlugin --force --output release --no-update-check",
+        "prewatch": "npm run build:native",
+        "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.laurens-bolle.teams-reactions\""
+    },
+    "type": "module",
+    "devDependencies": {
+        "@elgato/cli": "^1.9.0",
+        "@rollup/plugin-commonjs": "^29.0.2",
+        "@rollup/plugin-node-resolve": "^15.2.2",
+        "@rollup/plugin-typescript": "^12.1.0",
+        "@tsconfig/node20": "^20.1.2",
+        "@types/node": "~24.1.0",
+        "rollup": "^4.0.2",
+        "tslib": "^2.6.2",
+        "typescript": "^5.2.2"
+    },
+    "dependencies": {
+        "@elgato/streamdeck": "^2.0.0"
+    }
+}

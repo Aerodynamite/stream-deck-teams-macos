@@ -1,0 +1,9 @@
+# Node.js
+node_modules/
+.build-ts/
+.native-build/
+
+# Stream Deck files
+*.sdPlugin/bin
+*.sdPlugin/logs
+release/
