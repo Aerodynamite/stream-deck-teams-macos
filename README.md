@@ -1,88 +1,150 @@
-# Teams Reaction POC for macOS
+# Teams Reactions for Stream Deck
 
-This is a small proof of concept for pressing Microsoft Teams meeting reactions through the native macOS Accessibility API. It does not use the retired Teams third-party API, mouse coordinates, screenshots, or image recognition.
+A macOS Stream Deck plugin for sending Microsoft Teams meeting reactions through the native Accessibility API. It provides five separate keypad actions:
 
-It supports the five standard Teams reactions:
+- Like
+- Love
+- Applause
+- Laugh
+- Surprise
 
-- `like`
-- `love`
-- `applause`
-- `laugh`
-- `surprise`
+The plugin does not use mouse coordinates, screen capture, image recognition, Teams account credentials, or a network API. Each key press starts the bundled native helper, sends one allow-listed reaction command, and lets the helper exit.
+
+## Current status
+
+This is a local development build for Apple silicon Macs. The native reaction path has worked in a live Teams meeting, and the plugin package passes automated and manifest validation. The remaining hands-on milestone is confirming which executable macOS shows in Accessibility settings when Stream Deck launches the bundled helper.
+
+The plugin identifier `com.laurens-bolle.teams-reactions` and author metadata are development values. Confirm them before publishing. The helper is ad-hoc signed and the package is not notarized.
 
 ## Requirements
 
-- macOS with Xcode Command Line Tools installed
-- The current Microsoft Teams desktop application
-- A Terminal application with Accessibility permission
+- macOS 13 or newer
+- Apple silicon Mac
+- Stream Deck 7.1 or newer
+- Microsoft Teams with bundle identifier `com.microsoft.teams2`
+- Node.js 24 or newer when building from source
+- Xcode Command Line Tools
 
-## Build
+## Build and package
 
-Open Terminal in this directory and run:
+From the repository root:
 
 ```sh
-./build.sh
+cd teams-reactions
+npm ci
+npm test
+npm run build
+npm run validate
+npm run pack
 ```
 
-The compiled binary is written to `.build/teams-reaction`.
+The installable artifact is written to:
 
-Run the launcher-selection regression test with:
+```text
+teams-reactions/release/com.laurens-bolle.teams-reactions.streamDeckPlugin
+```
+
+`npm run pack` rebuilds both the Objective-C helper and the Node plugin before packaging them together. No companion application, daemon, or service is required.
+
+## Install the packaged plugin
+
+1. Keep the Stream Deck application open.
+2. In Finder, double-click `teams-reactions/release/com.laurens-bolle.teams-reactions.streamDeckPlugin`.
+3. Accept Stream Deck's installation prompt.
+4. In Stream Deck, find the **Teams Reactions** category.
+5. Drag the **Love** action onto a key for the first live test.
+
+If an older development copy with the same plugin identifier is already installed or linked, remove it in Stream Deck before installing the package.
+
+## Test in a Teams meeting
+
+1. Join a test meeting in the Microsoft Teams desktop application.
+2. Keep the meeting controls visible so Teams exposes its **React** button.
+3. Press the Stream Deck **Love** key once.
+4. On first use, macOS may open **System Settings > Privacy & Security > Accessibility**.
+5. Enable whichever entry macOS presents, expected to be `teams-reaction` or Stream Deck.
+6. Quit and reopen Stream Deck after changing the permission.
+7. Return to the meeting and press **Love** again.
+8. Confirm the heart appears in Teams. For delivery validation, have another participant or device confirm that it saw the reaction.
+
+A green check on the Stream Deck key means macOS accepted both Accessibility actions. It does not prove that the Teams service delivered the reaction. A yellow alert means the helper failed, timed out, or another reaction was already running.
+
+After Love works, add and test Like, Applause, Laugh, and Surprise. Pressing two reaction keys rapidly should never start overlapping helper processes. The second key press shows an alert while the first reaction is still running.
+
+## Test expected failures
+
+These checks verify Stream Deck feedback and local diagnostics:
+
+1. Quit Teams, then press a reaction key. The key should show an alert.
+2. Temporarily disable the relevant Accessibility permission, then press a key. The key should show an alert and macOS may prompt again.
+3. Open Teams without joining a meeting, then press a key. The key should show an alert because no safe meeting reaction control is available.
+
+The plugin logs only reaction names, exit codes, and privacy-safe diagnostics. It does not log helper stdout, meeting titles, or participant names.
+
+For a development link, logs are normally written under:
+
+```text
+teams-reactions/com.laurens-bolle.teams-reactions.sdPlugin/logs/
+```
+
+For a packaged installation, look under:
+
+```text
+~/Library/Application Support/com.elgato.StreamDeck/Plugins/com.laurens-bolle.teams-reactions.sdPlugin/logs/
+```
+
+## Development mode
+
+To link this checkout directly into Stream Deck:
+
+```sh
+cd teams-reactions
+npm ci
+npm run build
+npx streamdeck link com.laurens-bolle.teams-reactions.sdPlugin
+npx streamdeck restart com.laurens-bolle.teams-reactions
+```
+
+For TypeScript development with automatic plugin restarts:
+
+```sh
+npm run watch
+```
+
+The native helper is rebuilt when watch mode starts. Restart watch mode after changing `TeamsReactionPOC.m`.
+
+## Verification commands
+
+```sh
+cd teams-reactions
+npm test          # native launcher regression, Node tests, and TypeScript check
+npm run build     # native helper plus bundled Node plugin
+npm run validate  # official Elgato manifest and asset validation
+npm run pack      # validated .streamDeckPlugin artifact
+```
+
+The native helper can still be exercised independently from the repository root:
 
 ```sh
 ./test.sh
-```
-
-It verifies that the meeting `React` button is preferred over both `Raise your hand` and a chat-message reaction button.
-
-## First test: inspect without clicking
-
-1. Start Microsoft Teams.
-2. Join a test meeting.
-3. Make sure the meeting controls are visible.
-4. Run:
-
-```sh
+./build.sh
 ./.build/teams-reaction inspect
-```
-
-On first use, macOS should ask for Accessibility access. Under the following location, enable the new `teams-reaction` entry or the Terminal application running it, whichever macOS displays:
-
-`System Settings > Privacy & Security > Accessibility`
-
-Quit and reopen Terminal after granting permission. Then rerun the command. Avoid rebuilding the binary between granting permission and testing because macOS can treat a rebuilt ad-hoc-signed executable as a new program.
-
-`inspect` does not click anything. A successful result should include a reaction-menu candidate such as `React`, `Reactions`, or `React or raise your hand`.
-
-The inspection output can include accessible window and control labels. Review it before sharing it because a meeting title or participant name might appear.
-
-## Send a reaction
-
-While still in the meeting, run one of:
-
-```sh
-./.build/teams-reaction like
 ./.build/teams-reaction love
-./.build/teams-reaction applause
-./.build/teams-reaction laugh
-./.build/teams-reaction surprise
 ```
 
-The tool reports success only when macOS accepted both accessibility actions. Confirm that the reaction visibly appeared in Teams. For the strongest verification, use a second participant or device and check that it saw the reaction.
+`inspect` does not press a control, but its output can contain accessible window labels. Review that output before sharing it.
 
-## Suggested verification sequence
+## Architecture
 
-1. Run `inspect` during a meeting and confirm it finds the reaction menu.
-2. Send `like` while Teams is in front.
-3. Send `applause` while Terminal is in front.
-4. Ask another participant to confirm both reactions.
-5. Try all five reactions.
+```text
+Stream Deck key
+    -> Node.js Stream Deck SDK action
+    -> execFile("teams-reaction", [reaction])
+    -> macOS AXUIElement traversal
+    -> Teams meeting React button
+    -> requested reaction
+```
 
-## Expected limitations
+The Node layer uses `execFile` with exactly one allow-listed argument, a six-second timeout, privacy-safe error mapping, success and alert feedback, and a shared execution lock. The Objective-C helper retains the tested selection rule that prefers the meeting **React** control over **Raise your hand** and **React to this message**.
 
-- Teams may expose different labels in languages not included in the small synonym list.
-- An organizer or administrator can disable live reactions.
-- Teams interface updates can change accessible identifiers or labels.
-- Multiple simultaneous Teams meeting windows have not been qualified by this POC.
-- A successful Accessibility call proves that Teams accepted the UI action locally, not that the Teams service delivered it to other participants.
-
-If `inspect` sees meeting buttons but does not recognize the reaction control, save its output locally. That will show which label or accessibility identifier needs to be added without requiring a larger application.
+See [PLUGIN_HANDOFF.md](PLUGIN_HANDOFF.md) for the feasibility evidence, Accessibility behavior, exit-code contract, and known qualification gaps that preceded the plugin implementation.
