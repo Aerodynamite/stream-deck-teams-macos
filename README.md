@@ -56,6 +56,8 @@ teams-reactions/release/com.laurens-bolle.teams-reactions.streamDeckPlugin
 
 If an older development copy with the same plugin identifier is already installed or linked, remove it in Stream Deck before installing the package.
 
+The Stream Deck packer stores every file in the archive without an execute bit, so the installed `bin/teams-reaction` helper arrives as a plain 0644 file. The plugin restores the execute bit itself before each launch, so no manual `chmod` is needed after installation.
+
 ## Test in a Teams meeting
 
 1. Join a test meeting in the Microsoft Teams desktop application.
