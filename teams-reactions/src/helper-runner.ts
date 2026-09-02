@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { chmodSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const REACTIONS = ["like", "love", "applause", "laugh", "surprise"] as const;
@@ -95,8 +96,27 @@ export function isTeamsCommand(value: string): value is TeamsCommand {
 	return COMMAND_SET.has(value);
 }
 
-function safeDiagnostic(exitCode: number | null, timedOut: boolean, stderr: string): string {
+const EXECUTE_BITS = 0o111;
+const HELPER_MODE = 0o755;
+
+/**
+ * The Stream Deck packer stores every archive entry as 0644, so the native helper
+ * loses its execute bit when the plugin is installed from a .streamDeckPlugin file.
+ * Restore it before spawning so a packaged install works without manual repair.
+ */
+function ensureExecutable(helperPath: string): void {
+	try {
+		const { mode } = statSync(helperPath);
+		if ((mode & EXECUTE_BITS) === EXECUTE_BITS) return;
+		chmodSync(helperPath, HELPER_MODE);
+	} catch {
+		// Leave the real failure to the process launcher, which reports a spawn error code.
+	}
+}
+
+function safeDiagnostic(exitCode: number | null, spawnCode: string | null, timedOut: boolean, stderr: string): string {
 	if (timedOut) return "The Teams helper timed out.";
+	if (spawnCode !== null) return `The helper could not be started (${spawnCode}).`;
 	const diagnostics: Record<number, string> = {
 		1: "Accessibility permission is required.",
 		2: "Microsoft Teams is not running.",
@@ -186,6 +206,7 @@ function runHelper<T>(args: readonly string[], parser: (stdout: string) => T, op
 	const helperPath = options.helperPath ?? DEFAULT_HELPER_PATH;
 	const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 	const execFileImpl = options.execFileImpl ?? (execFile as ExecFileLike);
+	ensureExecutable(helperPath);
 	return new Promise((resolve, reject) => {
 		execFileImpl(helperPath, args, { encoding: "utf8", maxBuffer: MAX_OUTPUT_BYTES, timeout: timeoutMs }, (error, stdout, stderr) => {
 			if (!error) {
@@ -198,9 +219,10 @@ function runHelper<T>(args: readonly string[], parser: (stdout: string) => T, op
 			}
 			const rawCode = error.code;
 			const exitCode = typeof rawCode === "number" ? rawCode : null;
+			const spawnCode = typeof rawCode === "string" && /^E[A-Z0-9]+$/.test(rawCode) ? rawCode : null;
 			const killed = "killed" in error && error.killed === true;
 			const timedOut = killed && "signal" in error && error.signal === "SIGTERM";
-			reject(new HelperExecutionError(exitCode, timedOut, safeDiagnostic(exitCode, timedOut, stderr)));
+			reject(new HelperExecutionError(exitCode, timedOut, safeDiagnostic(exitCode, spawnCode, timedOut, stderr)));
 		});
 	});
 }
@@ -258,6 +280,7 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 	const helperPath = options.helperPath ?? DEFAULT_HELPER_PATH;
 	const timeoutMs = options.timeoutMs ?? DEFAULT_BURST_TIMEOUT_MS;
 	const spawnImpl = options.spawnImpl ?? (spawn as unknown as SpawnLike);
+	ensureExecutable(helperPath);
 	const child = spawnImpl(helperPath, ["burst", reaction], { stdio: ["pipe", "pipe", "pipe"] });
 	let stdout = "";
 	let stderr = "";
@@ -281,7 +304,8 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			reject(new HelperExecutionError(null, false, safeDiagnostic(null, false, error.message)));
+			const spawnCode = typeof error.code === "string" && /^E[A-Z0-9]+$/.test(error.code) ? error.code : null;
+			reject(new HelperExecutionError(null, false, safeDiagnostic(null, spawnCode, false, error.message)));
 		});
 		child.on("close", (code, signal) => {
 			if (settled) return;
@@ -298,7 +322,7 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 				return;
 			}
 			const timedOut = signal === "SIGTERM" && killedByTimeout;
-			reject(new HelperExecutionError(code, timedOut, safeDiagnostic(code, timedOut, stderr)));
+			reject(new HelperExecutionError(code, timedOut, safeDiagnostic(code, null, timedOut, stderr)));
 		});
 	});
 

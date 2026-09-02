@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -71,6 +74,33 @@ test("maps helper exit codes to privacy-safe diagnostics", async () => {
 	);
 });
 
+test("restores a missing execute bit before running the packaged helper", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "teams-reaction-"));
+	const helperPath = path.join(dir, "teams-reaction");
+	await fs.writeFile(helperPath, "fixture", { mode: 0o644 });
+
+	await runReactionHelper("like", {
+		helperPath,
+		execFileImpl: execResult({ command: "react", reaction: "like", changed: true, accessibilityAccepted: 1 }),
+	});
+
+	const mode = (await fs.stat(helperPath)).mode & 0o777;
+	assert.equal(mode & 0o111, 0o111);
+});
+
+test("reports a spawn failure code instead of a generic diagnostic", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "teams-reaction-"));
+	const helperPath = path.join(dir, "missing-helper");
+
+	await assert.rejects(
+		runReactionHelper("love", { helperPath }),
+		(error) =>
+			error instanceof HelperExecutionError
+			&& error.exitCode === null
+			&& error.diagnostic === "The helper could not be started (ENOENT).",
+	);
+});
+
 test("one lock prevents state commands and reactions from overlapping", async () => {
 	const lock = new OperationLock();
 	let release;
@@ -127,6 +157,20 @@ test("burst runner starts one helper and stops it by closing stdin", async () =>
 	child.stdout.emit("data", JSON.stringify({ command: "burst", reaction: "love", attempted: 1, accessibilityAccepted: 1, elapsedMs: 180, stopReason: "key-up" }));
 	child.emit("close", 0, null);
 	assert.equal((await session.completion).accessibilityAccepted, 1);
+});
+
+test("restores a missing execute bit before starting a reaction burst", async () => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "teams-reaction-"));
+	const helperPath = path.join(dir, "teams-reaction");
+	await fs.writeFile(helperPath, "fixture", { mode: 0o644 });
+	const child = new FakeChild();
+	const session = startReactionBurst("love", { helperPath, spawnImpl: () => child });
+
+	const mode = (await fs.stat(helperPath)).mode & 0o777;
+	assert.equal(mode & 0o111, 0o111);
+	child.stdout.emit("data", JSON.stringify({ command: "burst", reaction: "love", attempted: 1, accessibilityAccepted: 1, elapsedMs: 180, stopReason: "key-up" }));
+	child.emit("close", 0, null);
+	await session.completion;
 });
 
 test("burst runner contains a missing key-up with a timeout", async () => {

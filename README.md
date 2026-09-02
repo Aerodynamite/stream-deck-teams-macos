@@ -75,6 +75,17 @@ This requires `rsvg-convert` from librsvg.
 
 If an older development copy with the same plugin identifier is installed or linked, remove it before installing the package.
 
+## Reload after updating the plugin
+
+Stream Deck keeps the plugin process from the last install running. Copying a new `bin/plugin.js` into the installed plugin folder does not reload it, and `streamdeck restart` is ignored for a plugin that was installed from a package rather than linked in developer mode. To load a new build, either:
+
+- Install the repacked `.streamDeckPlugin` file again, or
+- Quit Stream Deck from its menu bar icon and reopen it.
+
+After a reload, `~/Library/Logs/ElgatoStreamDeck/StreamDeck.log` shows a new `Plugin connected` line for `com.laurens-bolle.teams-reactions`.
+
+The Stream Deck packer stores every file in the archive without an execute bit, so the installed `bin/teams-reaction` helper arrives as a plain 0644 file. The plugin restores the execute bit itself before each launch, so no manual `chmod` is needed after installation.
+
 ## First live test
 
 1. Join a test meeting in the Microsoft Teams desktop application.
