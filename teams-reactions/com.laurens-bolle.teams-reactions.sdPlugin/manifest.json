@@ -1,14 +1,14 @@
 {
 	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
-	"Name": "Teams Reactions",
-	"Version": "0.1.0.0",
+	"Name": "Teams Meeting Controls",
+	"Version": "0.2.0.0",
 	"Author": "Laurens Bolle",
 	"Actions": [
 		{
 			"Name": "Like",
 			"UUID": "com.laurens-bolle.teams-reactions.like",
 			"Icon": "imgs/actions/like/icon",
-			"Tooltip": "Send a Like reaction in the active Microsoft Teams meeting.",
+			"Tooltip": "Send a Like reaction. Hold the key for a short reaction wave.",
 			"Controllers": [
 				"Keypad"
 			],
@@ -25,7 +25,7 @@
 			"Name": "Love",
 			"UUID": "com.laurens-bolle.teams-reactions.love",
 			"Icon": "imgs/actions/love/icon",
-			"Tooltip": "Send a Love reaction in the active Microsoft Teams meeting.",
+			"Tooltip": "Send a Love reaction. Hold the key for a short reaction wave.",
 			"Controllers": [
 				"Keypad"
 			],
@@ -42,7 +42,7 @@
 			"Name": "Applause",
 			"UUID": "com.laurens-bolle.teams-reactions.applause",
 			"Icon": "imgs/actions/applause/icon",
-			"Tooltip": "Send an Applause reaction in the active Microsoft Teams meeting.",
+			"Tooltip": "Send an Applause reaction. Hold the key for a short reaction wave.",
 			"Controllers": [
 				"Keypad"
 			],
@@ -59,7 +59,7 @@
 			"Name": "Laugh",
 			"UUID": "com.laurens-bolle.teams-reactions.laugh",
 			"Icon": "imgs/actions/laugh/icon",
-			"Tooltip": "Send a Laugh reaction in the active Microsoft Teams meeting.",
+			"Tooltip": "Send a Laugh reaction. Hold the key for a short reaction wave.",
 			"Controllers": [
 				"Keypad"
 			],
@@ -76,7 +76,7 @@
 			"Name": "Surprise",
 			"UUID": "com.laurens-bolle.teams-reactions.surprise",
 			"Icon": "imgs/actions/surprise/icon",
-			"Tooltip": "Send a Surprise reaction in the active Microsoft Teams meeting.",
+			"Tooltip": "Send a Surprise reaction. Hold the key for a short reaction wave.",
 			"Controllers": [
 				"Keypad"
 			],
@@ -88,12 +88,117 @@
 					"ShowTitle": false
 				}
 			]
+		},
+		{
+			"Name": "Mute",
+			"UUID": "com.laurens-bolle.teams-reactions.mute",
+			"Icon": "imgs/actions/mute/icon",
+			"Tooltip": "Mute or unmute the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/mute/unmuted",
+					"Title": "Unmuted",
+					"ShowTitle": false
+				},
+				{
+					"Image": "imgs/actions/mute/muted",
+					"Title": "Muted",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Camera",
+			"UUID": "com.laurens-bolle.teams-reactions.camera",
+			"Icon": "imgs/actions/camera/icon",
+			"Tooltip": "Turn the camera on or off in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/camera/on",
+					"Title": "Camera on",
+					"ShowTitle": false
+				},
+				{
+					"Image": "imgs/actions/camera/off",
+					"Title": "Camera off",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Background Blur",
+			"UUID": "com.laurens-bolle.teams-reactions.blur",
+			"Icon": "imgs/actions/blur/icon",
+			"Tooltip": "Enable or disable background blur in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/blur/off",
+					"Title": "Blur off",
+					"ShowTitle": false
+				},
+				{
+					"Image": "imgs/actions/blur/on",
+					"Title": "Blur on",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Raise Hand",
+			"UUID": "com.laurens-bolle.teams-reactions.hand",
+			"Icon": "imgs/actions/hand/icon",
+			"Tooltip": "Raise or lower your hand in the active Microsoft Teams meeting.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/hand/lowered",
+					"Title": "Hand lowered",
+					"ShowTitle": false
+				},
+				{
+					"Image": "imgs/actions/hand/raised",
+					"Title": "Hand raised",
+					"ShowTitle": false
+				}
+			]
+		},
+		{
+			"Name": "Leave Call",
+			"UUID": "com.laurens-bolle.teams-reactions.leave",
+			"Icon": "imgs/actions/leave/icon",
+			"Tooltip": "Leave the active Microsoft Teams meeting without ending it for everyone.",
+			"Controllers": [
+				"Keypad"
+			],
+			"DisableAutomaticStates": true,
+			"States": [
+				{
+					"Image": "imgs/actions/leave/leave",
+					"Title": "Leave",
+					"ShowTitle": false
+				}
+			]
 		}
 	],
-	"Category": "Teams Reactions",
+	"Category": "Teams Meeting Controls",
 	"CategoryIcon": "imgs/plugin/category-icon",
 	"CodePath": "bin/plugin.js",
-	"Description": "Send Microsoft Teams meeting reactions from Stream Deck on macOS.",
+	"Description": "Control Microsoft Teams meetings and send reactions from Stream Deck on macOS.",
 	"Icon": "imgs/plugin/marketplace",
 	"ApplicationsToMonitor": {
 		"mac": [
