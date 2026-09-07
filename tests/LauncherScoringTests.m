@@ -62,6 +62,12 @@ int main(void) {
 
         AXNode *unmute = Button(@"Unmute", @"microphone-button", 10);
         Expect([MicrophoneStateForNode(unmute) isEqualToString:@"muted"], @"Unmute action must mean the microphone is currently muted", &failures);
+        AXNode *muteMic = Button(@"Mute mic", @"", 20);
+        AXNode *unmuteMic = Button(@"Unmute mic", @"", 20);
+        Expect(MicrophoneScore(muteMic) > 0, @"live Mute mic label must be recognized", &failures);
+        Expect([MicrophoneStateForNode(muteMic) isEqualToString:@"unmuted"], @"Mute mic must mean the microphone is currently unmuted", &failures);
+        Expect(MicrophoneScore(unmuteMic) > 0, @"live Unmute mic label must be recognized", &failures);
+        Expect([MicrophoneStateForNode(unmuteMic) isEqualToString:@"muted"], @"Unmute mic must mean the microphone is currently muted", &failures);
         AXNode *notificationMute = Button(@"Mute notification sounds", @"notification-mute", 8);
         Expect(MicrophoneScore(notificationMute) == NSIntegerMin, @"microphone scorer must require an exact action label", &failures);
 
@@ -87,9 +93,24 @@ int main(void) {
         AXNode *effects = Button(@"Video effects and settings", @"video-effects-button", 10);
         AXNode *blur = Button(@"Blur", @"background-effect-blur", 12);
         AXNode *none = Button(@"None", @"background-effect-none", 12);
+        AXNode *videoOptions = Button(@"Open video options", @"", 20);
+        AXNode *standardBlur = Button(@"Standard blur", @"", 17);
+        AXNode *noBackground = Button(@"No background effect", @"", 16);
         blur.selected = YES;
         Expect(EffectsLauncherScore(effects) > 0, @"video effects launcher must be recognized", &failures);
         Expect(BlurOptionScore(blur) > 0 && NoEffectOptionScore(none) > 0, @"blur and no-effect choices need separate scorers", &failures);
+        Expect(EffectsLauncherScore(videoOptions) > 0, @"live Open video options launcher must be recognized", &failures);
+        Expect(BlurOptionScore(standardBlur) > 0, @"live Standard blur option must be recognized", &failures);
+        Expect(NoEffectOptionScore(noBackground) > 0, @"live No background effect option must be recognized", &failures);
+
+        AXNode *standardBlurMenuItem = Button(@"Standard blur", @"", 17);
+        standardBlurMenuItem.role = (__bridge NSString *)kAXMenuItemRole;
+        AXNode *standardBlurText = Button(@"Standard blur", @"", 18);
+        standardBlurText.role = (__bridge NSString *)kAXStaticTextRole;
+        standardBlurText.actions = @[(__bridge NSString *)kAXShowMenuAction];
+        BOOL blurAmbiguous = NO;
+        AXNode *uniqueBlur = BestUniqueNode(@[standardBlurMenuItem, standardBlurText], ^NSInteger(AXNode *node) { return BlurOptionScore(node); }, &blurAmbiguous);
+        Expect(uniqueBlur == standardBlurMenuItem && !blurAmbiguous, @"blur scorer must select the pressable menu item over its text child", &failures);
 
         NSDictionary *snapshot = StateSnapshot(@{@"applicationCount": @1, @"elements": @[unmute, cameraOn, lowerHand, leave, react, effects, blur, none]});
         Expect([snapshot[@"meetingActive"] boolValue], @"known meeting controls must mark the meeting active", &failures);

@@ -134,28 +134,6 @@
 			]
 		},
 		{
-			"Name": "Background Blur",
-			"UUID": "com.laurens-bolle.teams-reactions.blur",
-			"Icon": "imgs/actions/blur/icon",
-			"Tooltip": "Enable or disable background blur in the active Microsoft Teams meeting.",
-			"Controllers": [
-				"Keypad"
-			],
-			"DisableAutomaticStates": true,
-			"States": [
-				{
-					"Image": "imgs/actions/blur/off",
-					"Title": "Blur off",
-					"ShowTitle": false
-				},
-				{
-					"Image": "imgs/actions/blur/on",
-					"Title": "Blur on",
-					"ShowTitle": false
-				}
-			]
-		},
-		{
 			"Name": "Raise Hand",
 			"UUID": "com.laurens-bolle.teams-reactions.hand",
 			"Icon": "imgs/actions/hand/icon",

@@ -6,7 +6,6 @@ The plugin provides these keypad actions:
 
 - Mute or unmute
 - Turn the camera on or off
-- Enable or disable background blur
 - Raise or lower your hand
 - Leave the call
 - Like, Love, Applause, Laugh, and Surprise reactions
@@ -22,8 +21,7 @@ Automated tests cover command allow-listing, JSON validation, process locking, b
 
 The implementation still needs live qualification in real Teams meetings before it should be treated as production-ready. In particular:
 
-- Exact microphone, camera, hand, leave, and effects labels need confirmation against the installed Teams build.
-- Background blur may be applied successfully while its final state remains `unknown` because Teams does not always expose the selected effect after the panel closes.
+- Exact microphone, camera, hand, and leave labels need confirmation against the installed Teams build.
 - Keyboard fallbacks are compiled but disabled by default until they pass focus and minimized-window testing.
 - Accessibility acceptance of repeated reactions does not prove that every reaction reached another participant.
 
@@ -90,7 +88,7 @@ The Stream Deck packer stores every file in the archive without an execute bit, 
 
 1. Join a test meeting in the Microsoft Teams desktop application.
 2. Keep the meeting controls visible for the first run.
-3. Add **Mute**, **Camera**, **Raise Hand**, **Background Blur**, **Leave Call**, and **Love** to a test Stream Deck profile.
+3. Add **Mute**, **Camera**, **Raise Hand**, **Leave Call**, and **Love** to a test Stream Deck profile.
 4. Press **Love** once.
 5. On first use, macOS may open **System Settings > Privacy & Security > Accessibility**.
 6. Enable the entry macOS presents, expected to be `teams-reaction` or Stream Deck.
@@ -117,7 +115,7 @@ Success feedback is shown once when the session ends. Logs contain only aggregat
 
 ## Control state behavior
 
-Mute, camera, blur, and hand actions use two Stream Deck states with automatic state changes disabled. The plugin asks the helper for current state when an action appears and updates all visible control keys after every completed command.
+Mute, camera, and hand actions use two Stream Deck states with automatic state changes disabled. The plugin asks the helper for current state when an action appears and updates all visible control keys after every completed command.
 
 Commands request an explicit result instead of blindly toggling:
 
@@ -126,8 +124,6 @@ mute
 unmute
 camera-on
 camera-off
-blur-on
-blur-off
 hand-raise
 hand-lower
 leave
@@ -157,8 +153,6 @@ Query state or invoke explicit commands:
 ./.build/teams-reaction unmute
 ./.build/teams-reaction camera-on
 ./.build/teams-reaction camera-off
-./.build/teams-reaction blur-on
-./.build/teams-reaction blur-off
 ./.build/teams-reaction hand-raise
 ./.build/teams-reaction hand-lower
 ./.build/teams-reaction leave
@@ -167,6 +161,8 @@ Query state or invoke explicit commands:
 ```
 
 Normal command results are one JSON object on standard output. Diagnostics go to standard error. `inspect-controls` omits meeting window titles, but its matched labels may still reflect the installed Teams language. Review diagnostic output before sharing it.
+
+The native helper retains experimental `blur-on` and `blur-off` commands for research and manual testing. The packaged Stream Deck plugin does not expose a Background Blur action.
 
 ## Keyboard shortcut fallback
 

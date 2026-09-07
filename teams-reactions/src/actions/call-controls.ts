@@ -15,7 +15,7 @@ import {
 } from "../helper-runner";
 import { commandCoordinator } from "../teams-services";
 
-type StateField = "microphone" | "camera" | "backgroundBlur" | "hand";
+type StateField = "microphone" | "camera" | "hand";
 type KnownState = "muted" | "unmuted" | "on" | "off" | "raised" | "lowered";
 
 const UNKNOWN_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="22" fill="#24262b"/><circle cx="72" cy="72" r="41" fill="none" stroke="#f0b429" stroke-width="9"/><text x="72" y="91" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="700" fill="#f0b429">?</text></svg>`;
@@ -29,7 +29,6 @@ function stateIndex(field: StateField, value: string): State | undefined {
 	const mappings: Record<StateField, readonly [KnownState, KnownState]> = {
 		microphone: ["unmuted", "muted"],
 		camera: ["on", "off"],
-		backgroundBlur: ["off", "on"],
 		hand: ["lowered", "raised"],
 	};
 	if (value === mappings[field][0]) return 0;
@@ -114,7 +113,7 @@ abstract class ToggleCallControlAction extends SingletonAction {
 			desiredIndex = ev.payload.userDesiredState;
 		} else {
 			let currentIndex = stateSynchronizer.latest ? stateIndex(this.field, stateSynchronizer.latest[this.field]) : undefined;
-			if (currentIndex === undefined && this.field !== "backgroundBlur") {
+			if (currentIndex === undefined) {
 				try {
 					await stateSynchronizer.refresh();
 				} catch (error) {
@@ -122,12 +121,11 @@ abstract class ToggleCallControlAction extends SingletonAction {
 				}
 				currentIndex = stateSynchronizer.latest ? stateIndex(this.field, stateSynchronizer.latest[this.field]) : undefined;
 			}
-			if (currentIndex === undefined && this.field !== "backgroundBlur") {
+			if (currentIndex === undefined) {
 				await ev.action.showAlert();
 				return;
 			}
-			const displayedIndex = currentIndex ?? ev.payload.state ?? 0;
-			desiredIndex = displayedIndex === 0 ? 1 : 0;
+			desiredIndex = currentIndex === 0 ? 1 : 0;
 		}
 
 		const command = this.commands[desiredIndex];
@@ -140,7 +138,6 @@ abstract class ToggleCallControlAction extends SingletonAction {
 			}
 			const result = execution.result;
 			const confirmedIndex = stateIndex(this.field, result[this.field]);
-			if (confirmedIndex === undefined && this.field === "backgroundBlur") await ev.action.setState(desiredIndex);
 			await stateSynchronizer.apply(result);
 			if (confirmedIndex === desiredIndex) {
 				streamDeck.logger.info(`Teams command completed: ${command}; changed=${result.changed}.`);
@@ -175,12 +172,6 @@ export class MuteAction extends ToggleCallControlAction {
 export class CameraAction extends ToggleCallControlAction {
 	protected readonly field = "camera" as const;
 	protected readonly commands = ["camera-on", "camera-off"] as const;
-}
-
-@action({ UUID: "com.laurens-bolle.teams-reactions.blur" })
-export class BlurAction extends ToggleCallControlAction {
-	protected readonly field = "backgroundBlur" as const;
-	protected readonly commands = ["blur-off", "blur-on"] as const;
 }
 
 @action({ UUID: "com.laurens-bolle.teams-reactions.hand" })

@@ -8,7 +8,6 @@ import {
 	SurpriseAction,
 } from "./actions/reactions";
 import {
-	BlurAction,
 	CameraAction,
 	HandAction,
 	LeaveAction,
@@ -25,7 +24,6 @@ streamDeck.actions.registerAction(new LaughAction());
 streamDeck.actions.registerAction(new SurpriseAction());
 streamDeck.actions.registerAction(new MuteAction());
 streamDeck.actions.registerAction(new CameraAction());
-streamDeck.actions.registerAction(new BlurAction());
 streamDeck.actions.registerAction(new HandAction());
 streamDeck.actions.registerAction(new LeaveAction());
 

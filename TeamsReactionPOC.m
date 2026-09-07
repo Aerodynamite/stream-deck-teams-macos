@@ -76,11 +76,11 @@ static NSArray<NSString *> *LauncherLabels(void) {
 }
 
 static NSArray<NSString *> *MuteLabels(void) {
-    return @[@"mute", @"mute microphone", @"dempen", @"microfoon dempen", @"stummschalten", @"mikrofon stummschalten", @"désactiver le micro", @"silenciar", @"silenciar micrófono"];
+    return @[@"mute", @"mute mic", @"mute microphone", @"dempen", @"microfoon dempen", @"stummschalten", @"mikrofon stummschalten", @"désactiver le micro", @"silenciar", @"silenciar micrófono"];
 }
 
 static NSArray<NSString *> *UnmuteLabels(void) {
-    return @[@"unmute", @"unmute microphone", @"dempen opheffen", @"microfoon inschakelen", @"stummschaltung aufheben", @"mikrofon einschalten", @"activer le micro", @"reactivar audio", @"activar micrófono"];
+    return @[@"unmute", @"unmute mic", @"unmute microphone", @"dempen opheffen", @"microfoon inschakelen", @"stummschaltung aufheben", @"mikrofon einschalten", @"activer le micro", @"reactivar audio", @"activar micrófono"];
 }
 
 static NSArray<NSString *> *CameraOffLabels(void) {
@@ -104,15 +104,15 @@ static NSArray<NSString *> *LeaveLabels(void) {
 }
 
 static NSArray<NSString *> *EffectsLauncherLabels(void) {
-    return @[@"video effects and settings", @"backgrounds and effects", @"effects and avatars", @"video effects", @"achtergronden en effecten", @"video-effecten", @"hintergründe und effekte", @"effets vidéo", @"arrière-plans et effets", @"fondos y efectos", @"efectos de vídeo"];
+    return @[@"open video options", @"video effects and settings", @"backgrounds and effects", @"effects and avatars", @"video effects", @"achtergronden en effecten", @"video-effecten", @"hintergründe und effekte", @"effets vidéo", @"arrière-plans et effets", @"fondos y efectos", @"efectos de vídeo"];
 }
 
 static NSArray<NSString *> *BlurLabels(void) {
-    return @[@"blur", @"background blur", @"vervagen", @"achtergrond vervagen", @"weichzeichnen", @"hintergrund weichzeichnen", @"flou", @"flouter l’arrière-plan", @"desenfocar", @"desenfocar fondo"];
+    return @[@"blur", @"standard blur", @"background blur", @"vervagen", @"achtergrond vervagen", @"weichzeichnen", @"hintergrund weichzeichnen", @"flou", @"flouter l’arrière-plan", @"desenfocar", @"desenfocar fondo"];
 }
 
 static NSArray<NSString *> *NoEffectLabels(void) {
-    return @[@"none", @"no effect", @"no background", @"geen", @"geen effect", @"zonder achtergrond", @"keine", @"kein effekt", @"aucun", @"aucun effet", @"ninguno", @"sin efecto"];
+    return @[@"none", @"no effect", @"no background", @"no background effect", @"geen", @"geen effect", @"zonder achtergrond", @"keine", @"kein effekt", @"aucun", @"aucun effet", @"ninguno", @"sin efecto"];
 }
 
 static NSArray<NSString *> *ApplyLabels(void) {
@@ -374,6 +374,7 @@ static NSInteger EffectsLauncherScore(AXNode *node) {
 }
 
 static NSInteger BlurOptionScore(AXNode *node) {
+    if (![node.actions containsObject:(__bridge NSString *)kAXPressAction]) return NSIntegerMin;
     if (!NodeMatchesAction(node, BlurLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     NSString *identifier = node.identifier.lowercaseString;
@@ -383,6 +384,7 @@ static NSInteger BlurOptionScore(AXNode *node) {
 }
 
 static NSInteger NoEffectOptionScore(AXNode *node) {
+    if (![node.actions containsObject:(__bridge NSString *)kAXPressAction]) return NSIntegerMin;
     if (!NodeMatchesAction(node, NoEffectLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     NSString *identifier = node.identifier.lowercaseString;
@@ -688,41 +690,53 @@ static int PerformBlur(BOOL enable) {
         WriteJSON(ResultForScan(initialScan, command, NO));
         return 0;
     }
-    BOOL ambiguous = NO;
-    AXNode *launcher = BestUniqueNode(initialScan[@"elements"], ^NSInteger(AXNode *node) { return EffectsLauncherScore(node); }, &ambiguous);
-    if (ambiguous) {
-        WriteJSON(ResultForScan(initialScan, command, NO));
-        fprintf(stderr, "More than one equally plausible video-effects control was exposed.\n");
-        return 11;
-    }
-    if (!launcher) {
-        WriteJSON(ResultForScan(initialScan, command, NO));
-        fprintf(stderr, "Video effects are unavailable or the effects control is not exposed.\n");
-        return 14;
-    }
     NSMutableSet<NSNumber *> *initialIdentities = [NSMutableSet set];
     for (AXNode *node in initialScan[@"elements"]) [initialIdentities addObject:@(CFHash(node.element))];
-    ScrollNodeIntoView(launcher);
-    AXError launcherError = PressNode(launcher);
-    if (launcherError != kAXErrorSuccess) {
+    NodeScorer targetScorer = enable
+        ? ^NSInteger(AXNode *node) { return BlurOptionScore(node); }
+        : ^NSInteger(AXNode *node) { return NoEffectOptionScore(node); };
+    BOOL targetAmbiguous = NO;
+    AXNode *target = BestUniqueNode(initialScan[@"elements"], targetScorer, &targetAmbiguous);
+    if (targetAmbiguous) {
         WriteJSON(ResultForScan(initialScan, command, NO));
-        fprintf(stderr, "Could not open video effects: %s.\n", AXErrorDescription(launcherError).UTF8String);
-        return 12;
+        fprintf(stderr, "The requested video effect was ambiguous.\n");
+        return 11;
     }
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:MenuTimeout];
-    NSDictionary *currentScan;
-    AXNode *target = nil;
-    do {
-        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
-        currentScan = ScanTeams();
-        BOOL targetAmbiguous = NO;
-        target = FindEffectOption(currentScan[@"elements"], enable, initialIdentities, &targetAmbiguous);
-        if (targetAmbiguous) {
-            WriteJSON(ResultForScan(currentScan, command, NO));
-            fprintf(stderr, "The requested video effect was ambiguous.\n");
-            return 11;
+    NSDictionary *currentScan = initialScan;
+    if (!target) {
+        AXError lastLauncherError = kAXErrorSuccess;
+        for (NSInteger attempt = 0; attempt < 2 && !target; attempt += 1) {
+            BOOL launcherAmbiguous = NO;
+            AXNode *launcher = BestUniqueNode(currentScan[@"elements"], ^NSInteger(AXNode *node) { return EffectsLauncherScore(node); }, &launcherAmbiguous);
+            if (launcherAmbiguous) {
+                WriteJSON(ResultForScan(currentScan, command, NO));
+                fprintf(stderr, "More than one equally plausible video-effects control was exposed.\n");
+                return 11;
+            }
+            if (!launcher) break;
+            ScrollNodeIntoView(launcher);
+            lastLauncherError = PressNode(launcher);
+            if (lastLauncherError != kAXErrorSuccess) continue;
+            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:MenuTimeout];
+            do {
+                [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
+                currentScan = ScanTeams();
+                targetAmbiguous = NO;
+                target = FindEffectOption(currentScan[@"elements"], enable, initialIdentities, &targetAmbiguous);
+                if (targetAmbiguous) break;
+            } while (!target && deadline.timeIntervalSinceNow > 0);
+            if (targetAmbiguous) {
+                WriteJSON(ResultForScan(currentScan, command, NO));
+                fprintf(stderr, "The requested video effect was ambiguous.\n");
+                return 11;
+            }
         }
-    } while (!target && deadline.timeIntervalSinceNow > 0);
+        if (!target && lastLauncherError != kAXErrorSuccess) {
+            WriteJSON(ResultForScan(currentScan, command, NO));
+            fprintf(stderr, "Could not open video effects: %s.\n", AXErrorDescription(lastLauncherError).UTF8String);
+            return 12;
+        }
+    }
     if (!target) {
         WriteJSON(ResultForScan(currentScan, command, NO));
         fprintf(stderr, "The requested video effect was not available.\n");
@@ -749,7 +763,7 @@ static int PerformBlur(BOOL enable) {
         return score;
     }, &applyAmbiguous);
     if (apply && !applyAmbiguous) PressNode(apply);
-    deadline = [NSDate dateWithTimeIntervalSinceNow:1.2];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1.2];
     do {
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
         currentScan = ScanTeams();

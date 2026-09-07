@@ -6,14 +6,14 @@ Date: 2026-09-02
 
 The recommended first milestone is implemented in plugin version `0.2.0.0`:
 
-- Explicit status, microphone, camera, blur, hand, leave, and reaction commands return machine-readable JSON.
-- Mute, camera, blur, and hand are plugin-controlled two-state Stream Deck actions. Leave is a separate safe action.
+- Explicit status, microphone, camera, hand, leave, and reaction commands return machine-readable JSON. Experimental blur commands remain available in the native helper.
+- Mute, camera, and hand are plugin-controlled two-state Stream Deck actions. Leave is a separate safe action. Background blur is intentionally not exposed as a Stream Deck action because its Teams interaction and state feedback did not provide a good enough user experience.
 - Control-specific Accessibility scorers reject unsafe contexts and fail on equally plausible candidates.
 - Leave selection explicitly rejects end-meeting, end-for-all, decline, and dismiss controls.
 - Process-targeted keyboard fallbacks exist for microphone, camera, hand, and leave, but remain disabled until live qualification.
 - Reaction keys use one bounded native child process from key-down through key-up, with a 300 ms hold threshold, a 3-attempt-per-second default, a 3-second duration guard, and hard limits of 10 attempts per second and 30 attempts.
 
-Automated tests and package validation pass. Live Teams qualification remains open, including exact installed-client labels, blur state exposure, compact and hidden toolbars, shortcut focus behavior, organizer Leave safety, and second-participant reaction delivery. Track those results in [the live qualification checklist](../testing/teams-call-controls.md).
+Automated tests and package validation pass. Live Teams qualification remains open, including exact installed-client labels, compact and hidden toolbars, shortcut focus behavior, organizer Leave safety, and second-participant reaction delivery. Track those results in [the live qualification checklist](../testing/teams-call-controls.md).
 
 ## Executive recommendation
 

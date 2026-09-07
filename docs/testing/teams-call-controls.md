@@ -36,16 +36,6 @@ Use a disposable meeting. Keep a second participant or device connected for reac
 | Leave as attendee | The local participant leaves and the meeting continues | Not run |
 | Leave as organizer | The local organizer leaves without selecting End meeting for all | Not run |
 
-## Background blur
-
-| Case | Expected result | Result |
-|---|---|---|
-| Enable blur from no effect | Blur is selected or the key reports unknown with one alert if final state is not exposed | Not run |
-| Disable blur from blur | None or no effect is selected | Not run |
-| Blur while camera is off | The operation either succeeds safely or reports unavailable or unknown without changing another setting | Not run |
-| Video effects blocked by policy | The key shows an alert and no unrelated control is pressed | Not run |
-| More than one plausible effect option | The helper refuses the operation as ambiguous | Not run |
-
 ## Toolbar and window variants
 
 Repeat mute, camera, hand, and leave in each applicable state:
@@ -113,4 +103,4 @@ Also verify:
 
 ## Release decision
 
-Do not call the plugin production-ready until all core controls pass in both directions, Leave is proven safe for attendee and organizer roles, blur policy behavior is understood, and the default 3-per-second reaction wave is confirmed by a second participant.
+Do not call the plugin production-ready until all core controls pass in both directions, Leave is proven safe for attendee and organizer roles, and the default 3-per-second reaction wave is confirmed by a second participant.
