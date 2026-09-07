@@ -28,4 +28,23 @@ for reaction in like love applause laugh surprise; do
   rsvg-convert -w 144 -h 144 -o "$action_images/key@2x.png" "$assets_dir/$reaction-key.svg"
 done
 
+render_control() {
+  control=$1
+  shift
+  action_images="$plugin_dir/imgs/actions/$control"
+  mkdir -p "$action_images"
+  rsvg-convert -w 20 -h 20 -o "$action_images/icon.png" "$assets_dir/$control-icon.svg"
+  rsvg-convert -w 40 -h 40 -o "$action_images/icon@2x.png" "$assets_dir/$control-icon.svg"
+  for state_asset in "$@"; do
+    state_name=${state_asset#"$control-"}
+    rsvg-convert -w 72 -h 72 -o "$action_images/$state_name.png" "$assets_dir/$state_asset-key.svg"
+    rsvg-convert -w 144 -h 144 -o "$action_images/$state_name@2x.png" "$assets_dir/$state_asset-key.svg"
+  done
+}
+
+render_control mute mute-unmuted mute-muted
+render_control camera camera-on camera-off
+render_control hand hand-lowered hand-raised
+render_control leave leave
+
 echo "Regenerated Stream Deck icons in: $plugin_dir/imgs"
