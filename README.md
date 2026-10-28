@@ -57,8 +57,10 @@ Call** in a disposable meeting before relying on it.
 
 ## Status
 
-Version `0.2.0.8` keeps microphone and camera controls responsive with a persistent
-native helper and fixes missing controls caused by Accessibility hash collisions.
+Version `0.2.0.10` adds bounded recovery for stale reaction buttons and forced
+timeouts for unresponsive helpers. It retains strict reaction picker matching,
+the persistent native helper for responsive microphone and camera controls,
+and the Accessibility hash collision fix.
 Live checks confirmed microphone and camera changes and a reaction tap with Teams
 in the background; earlier helper checks confirmed both hand commands.
 

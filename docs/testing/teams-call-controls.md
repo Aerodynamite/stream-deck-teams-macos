@@ -292,3 +292,71 @@ reaction soaks remain unverified.
 Installed `0.2.0.8` was verified against the manifest and both rebuilt binary
 hashes after completing Stream Deck's Install prompt. Stream Deck started a new
 plugin process, PID 89177.
+
+## 2026-10-28 reaction picker readiness during screen sharing
+
+During a meeting with another participant sharing, plugin logs showed intermittent
+reaction press failures (exit 6), successful taps and holds, and separate busy-lock
+rejections. A read-only preparation probe reproduced the selector returning a
+pressable Love `AXGroup` outside the picker before the popup buttons appeared.
+The first scan contained that group but none of the five picker buttons. Later
+scans contained all five buttons. Matching reaction words could therefore end
+discovery before the actual picker was ready.
+
+Version `0.2.0.9` requires a confirmed meeting picker, `AXButton`, an actual
+`AXPress` action, and an exact supported action label. Existing reaction content,
+picker containers, substring matches, and show-menu-only elements are rejected.
+The new regression fixtures failed before the change. Native tests, all 34 Node
+tests, and TypeScript checking pass afterward.
+
+The live preparation probe then selected a fresh picker button for all five
+reactions in the same meeting. It opened and dismissed the picker without
+pressing a reaction. Actual reaction taps, holds, delivery to another participant,
+and repeated physical Stream Deck presses during sharing remain unverified on
+this version. The preparation result does not establish delivery or exclude
+additional transient button replacement failures.
+
+Packaging and manifest validation passed. Installed version `0.2.0.9` and both
+installed binary hashes match the rebuilt bundle. Stream Deck started a new
+plugin process, PID 26210, reporting `0.2.0.9`.
+
+The user clarified that Applause was the working reaction and that the other
+four still failed after sharing stopped. With permission to send reactions, a
+diagnostic helper prepared and pressed all five choices successfully. Each fresh
+button was enabled and each `AXPress` returned success. A second check invoked
+the installed helper's actual `burst <reaction>` path for all five reactions,
+closing stdin after 80 ms to simulate a tap. Every invocation exited zero with
+exactly one attempted and accepted press, taking 657 to 852 ms before cleanup.
+This did not reproduce the reported physical-key failure. Visual delivery and
+physical Stream Deck button handling still require user confirmation; these
+direct helper results do not establish either.
+
+## 2026-10-28 bounded recovery and hung-helper fallback
+
+Version `0.2.0.10` adds a single native reaction retry after an invalid-element
+or unsupported-action result, including the first tap. Recovery first searches
+the existing picker, avoiding an unnecessary launcher toggle. `CannotComplete`
+and other uncertain failures are not replayed. Repeated presses check release
+and the duration guard before recovery and again before the recovered press.
+Successful presses do not incur another scan.
+
+A Node regression reproduced a helper ignoring `SIGTERM` and leaving the shared
+lock held indefinitely. The burst watchdog now escalates to `SIGKILL` after
+300 ms, holds the lock until process closure, and permits the next operation.
+One-shot helper timeouts also force termination. No timed-out command is replayed.
+The watchdog and native stale-first-press regressions failed before these fixes.
+Native tests, all 36 Node tests, TypeScript checking, packaging, and manifest
+validation pass afterward.
+
+A live fault-injection probe prepared each of the five reactions, simulated an
+invalid first target without sending it, then exercised the production recovery
+and press path. All five reacquired successfully and Accessibility accepted one
+actual press each. This verifies the existing-picker recovery path with an
+injected stale target, rather than reproducing the user's intermittent failure.
+Physical Stream Deck presses, long holds and cancellation during actual slow
+Accessibility calls, another participant's delivery, minimized/compact windows,
+and Leave safety remain unverified on this version.
+
+Installed manifest `0.2.0.10` and both installed binary hashes match the rebuilt
+bundle. Stream Deck started a new plugin process, PID 81093, reporting this
+version.

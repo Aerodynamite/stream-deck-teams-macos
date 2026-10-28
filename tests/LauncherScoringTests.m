@@ -37,6 +37,61 @@ int main(void) {
     @autoreleasepool {
         int failures = 0;
 
+        __block NSInteger reactionPresses = 0;
+        __block NSInteger reacquisitions = 0;
+        AXError recovered = PressReactionWithRecovery(^AXError {
+            reactionPresses += 1;
+            return reactionPresses == 1 ? kAXErrorInvalidUIElement : kAXErrorSuccess;
+        }, ^AXError { reacquisitions += 1; return kAXErrorSuccess; }, ^BOOL { return YES; });
+        Expect(recovered == kAXErrorSuccess && reactionPresses == 2 && reacquisitions == 1, @"a stale first reaction press must reacquire once and recover", &failures);
+        reactionPresses = 0; reacquisitions = 0;
+        AXError failedAgain = PressReactionWithRecovery(^AXError {
+            reactionPresses += 1; return kAXErrorInvalidUIElement;
+        }, ^AXError { reacquisitions += 1; return kAXErrorSuccess; }, ^BOOL { return YES; });
+        Expect(failedAgain == kAXErrorInvalidUIElement && reactionPresses == 2 && reacquisitions == 1, @"reaction recovery must stop after one retry", &failures);
+        reactionPresses = 0; reacquisitions = 0;
+        AXError uncertain = PressReactionWithRecovery(^AXError {
+            reactionPresses += 1; return kAXErrorCannotComplete;
+        }, ^AXError { reacquisitions += 1; return kAXErrorSuccess; }, ^BOOL { return YES; });
+        Expect(uncertain == kAXErrorCannotComplete && reactionPresses == 1 && reacquisitions == 0, @"an uncertain reaction result must not be replayed", &failures);
+        reactionPresses = 0; reacquisitions = 0;
+        PressReactionWithRecovery(^AXError { reactionPresses += 1; return kAXErrorSuccess; }, ^AXError {
+            reacquisitions += 1; return kAXErrorSuccess;
+        }, ^BOOL { return YES; });
+        Expect(reactionPresses == 1 && reacquisitions == 0, @"successful reactions must take the direct path", &failures);
+        reactionPresses = 0; reacquisitions = 0;
+        PressReactionWithRecovery(^AXError { reactionPresses += 1; return kAXErrorInvalidUIElement; }, ^AXError {
+            reacquisitions += 1; return kAXErrorSuccess;
+        }, ^BOOL { return reactionPresses == 0; });
+        Expect(reactionPresses == 1 && reacquisitions == 0, @"release or duration expiry must prevent reaction recovery", &failures);
+        reactionPresses = 0; reacquisitions = 0;
+        PressReactionWithRecovery(^AXError { reactionPresses += 1; return kAXErrorInvalidUIElement; }, ^AXError {
+            reacquisitions += 1; return kAXErrorSuccess;
+        }, ^BOOL { return reacquisitions == 0; });
+        Expect(reactionPresses == 1 && reacquisitions == 1, @"release during discovery must prevent the recovered press", &failures);
+
+        NSDictionary *loveReaction = ReactionDefinitions()[@"love"];
+        AXNode *existingLove = Button(@"Love", @"", 22);
+        existingLove.role = (__bridge NSString *)kAXGroupRole;
+        Expect(ReactionScore(existingLove, loveReaction) == NSIntegerMin, @"existing reaction content must not end picker discovery before its buttons appear", &failures);
+        AXNode *outsideLove = Button(@"Love", @"", 13);
+        Expect(ReactionScore(outsideLove, loveReaction) == NSIntegerMin, @"a reaction button outside a confirmed meeting picker must be rejected", &failures);
+        for (NSString *key in ReactionDefinitions()) {
+            NSDictionary *definition = ReactionDefinitions()[key];
+            AXNode *choice = Button(definition[@"labels"][0], @"", 13);
+            choice.meetingReactionPicker = YES;
+            Expect(ReactionScore(choice, definition) > 0, @"each exact picker reaction button must remain eligible", &failures);
+            choice.actions = @[(__bridge NSString *)kAXShowMenuAction];
+            Expect(ReactionScore(choice, definition) == NSIntegerMin, @"reaction selection requires an actual press action", &failures);
+        }
+        AXNode *pickerContainer = Button(@"Love", @"", 12);
+        pickerContainer.meetingReactionPicker = YES;
+        pickerContainer.role = (__bridge NSString *)kAXGroupRole;
+        Expect(ReactionScore(pickerContainer, loveReaction) == NSIntegerMin, @"picker containers must not masquerade as reaction buttons", &failures);
+        AXNode *reactionDescription = Button(@"Someone sent Love", @"love-content", 10);
+        reactionDescription.meetingReactionPicker = YES;
+        Expect(ReactionScore(reactionDescription, loveReaction) == NSIntegerMin, @"reaction words in content must not match a picker action", &failures);
+
         __block NSInteger dismissals = 0;
         DismissPickerUntilGone(^{ dismissals += 1; }, ^BOOL { return dismissals < 2; });
         Expect(dismissals == 2, @"picker cleanup must retry an ignored Escape and stop once dismissed", &failures);

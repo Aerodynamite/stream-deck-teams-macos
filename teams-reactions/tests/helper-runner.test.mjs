@@ -45,6 +45,16 @@ test("runs an allow-listed state command and parses JSON", async () => {
 	assert.equal(result.backgroundBlur, "unknown");
 });
 
+test("one-shot helpers use a forced timeout and report it without replay", async () => {
+	let calls = 0;
+	await assert.rejects(runTeamsCommand("status", { execFileImpl: (_file, _args, options, callback) => {
+		calls += 1;
+		assert.equal(options.killSignal, "SIGKILL");
+		callback(Object.assign(new Error("timeout"), { killed: true, signal: "SIGKILL" }), "", "");
+	} }), error => error instanceof HelperExecutionError && error.timedOut);
+	assert.equal(calls, 1);
+});
+
 test("allows the hand picker round trip to finish and preserves explicit timeouts", async () => {
 	for (const [command, timeoutMs, expected] of [["hand-raise", undefined, 15_000], ["hand-lower", undefined, 15_000], ["status", undefined, 8_000], ["hand-raise", 1234, 1234]]) {
 		const capture = {};
@@ -193,6 +203,27 @@ test("burst runner still reports a timeout when the helper ignores key-up", asyn
 	const session = startReactionBurst("like", { timeoutMs: 15, spawnImpl: () => child });
 	session.stop();
 	await assert.rejects(session.completion, (error) => error instanceof HelperExecutionError && error.timedOut);
+});
+
+test("a hung burst is killed before its lock is released and the next key can run", async () => {
+	const child = new FakeChild();
+	const signals = [];
+	child.kill = (signal) => {
+		signals.push(signal);
+		if (signal === "SIGKILL") queueMicrotask(() => child.emit("close", null, signal));
+		return true;
+	};
+	const lock = new OperationLock();
+	const coordinator = new ReactionBurstCoordinator(lock, () => startReactionBurst("like", { timeoutMs: 10, spawnImpl: () => child }));
+	const started = coordinator.start("key", "like");
+	const verdict = started.completion.then(() => "completed", error => error);
+	await new Promise(resolve => setTimeout(resolve, 30));
+	assert.deepEqual(coordinator.start("other", "love"), { status: "busy" });
+	const result = await Promise.race([verdict, new Promise(resolve => setTimeout(() => resolve("still hung"), 500))]);
+	assert.ok(result instanceof HelperExecutionError && result.timedOut, "the timeout must settle even when SIGTERM is ignored");
+	assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+	const commands = new CommandCoordinator(lock, async () => STATE_RESULT);
+	assert.equal((await commands.execute("status")).status, "completed");
 });
 
 test("burst coordinator matches key-up by action context and stays exclusive", async () => {

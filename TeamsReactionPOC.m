@@ -395,12 +395,6 @@ static NSString *Normalized(NSString *text) {
     return [(text.lowercaseString ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
-static BOOL ContainsAny(NSString *text, NSArray<NSString *> *labels) {
-    NSString *normalized = Normalized(text);
-    for (NSString *label in labels) if ([normalized containsString:Normalized(label)]) return YES;
-    return NO;
-}
-
 static BOOL EqualsAny(NSString *text, NSArray<NSString *> *labels) {
     NSString *normalized = Normalized(text);
     for (NSString *label in labels) if ([normalized isEqualToString:Normalized(label)]) return YES;
@@ -456,7 +450,11 @@ static NSInteger LauncherScore(AXNode *node) {
 
 static NSInteger ReactionScore(AXNode *node, NSDictionary *reaction) {
     NSArray<NSString *> *labels = reaction[@"labels"];
-    if (!ContainsAny(node.searchableText, labels)) return NSIntegerMin;
+    // Shared meeting content can expose pressable reaction groups before the
+    // picker opens. Wait for its actual buttons rather than accepting content.
+    if (!node.meetingReactionPicker || ![node.role isEqualToString:(__bridge NSString *)kAXButtonRole]) return NSIntegerMin;
+    if (![node.actions containsObject:(__bridge NSString *)kAXPressAction] || HasUnsafeContext(node)) return NSIntegerMin;
+    if (!NodeMatchesAction(node, labels)) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     if (score == NSIntegerMin) return score;
     for (NSString *label in labels) if ([node.searchableText isEqualToString:Normalized(label)]) score += 30;
@@ -1275,6 +1273,13 @@ static int PrepareReactionSession(NSDictionary *reaction, ReactionSession **sess
 }
 
 static AXError ReacquireReactionTarget(ReactionSession *session) {
+    // Teams can replace the button while leaving its picker open. Reuse that
+    // picker before trying the launcher, which would otherwise toggle it shut.
+    AXNode *existing = FindReactionTarget(session.reaction, session.launcher, nil, 0, YES);
+    if (existing) {
+        session.target = existing;
+        return kAXErrorSuccess;
+    }
     AXError launcherError = PressNode(session.launcher);
     if (launcherError == kAXErrorInvalidUIElement || launcherError == kAXErrorCannotComplete) {
         NSDictionary *scan = ScanTeams();
@@ -1292,6 +1297,19 @@ static AXError ReacquireReactionTarget(ReactionSession *session) {
     return kAXErrorSuccess;
 }
 
+static AXError PressReactionWithRecovery(AXError (^press)(void), AXError (^reacquire)(void), BOOL (^canContinue)(void)) {
+    if (!canContinue()) return kAXErrorCannotComplete;
+    AXError error = press();
+    // CannotComplete is an uncertain result: Teams may have received the press.
+    // Only retry errors that establish the original action was not performed.
+    if (error != kAXErrorInvalidUIElement && error != kAXErrorActionUnsupported) return error;
+    if (!canContinue()) return error;
+    AXError recovery = reacquire();
+    if (recovery != kAXErrorSuccess) return recovery;
+    if (!canContinue()) return kAXErrorCannotComplete;
+    return press();
+}
+
 static int SendReaction(NSDictionary *reaction, NSString *commandName) {
     ReactionSession *session = nil;
     int prepareStatus = PrepareReactionSession(reaction, &session);
@@ -1299,7 +1317,8 @@ static int SendReaction(NSDictionary *reaction, NSString *commandName) {
         fprintf(stderr, "Could not prepare the requested Teams reaction.\n");
         return prepareStatus;
     }
-    AXError reactionError = PressNode(session.target);
+    AXError reactionError = PressReactionWithRecovery(^AXError { return PressNode(session.target); },
+        ^AXError { return ReacquireReactionTarget(session); }, ^BOOL { return YES; });
     if (reactionError != kAXErrorSuccess) {
         fprintf(stderr, "Could not press the requested reaction: %s.\n", AXErrorDescription(reactionError).UTF8String);
         return 6;
@@ -1344,7 +1363,10 @@ static int BurstReaction(NSDictionary *reaction, NSInteger requestedRate) {
     } else {
         attempted = 1;
         NSTimeInterval firstPressTime = -start.timeIntervalSinceNow;
-        AXError firstError = PressNode(session.target);
+        AXError firstError = PressReactionWithRecovery(^AXError { return PressNode(session.target); },
+            ^AXError { return ReacquireReactionTarget(session); },
+            ^BOOL { return -start.timeIntervalSinceNow < BurstDurationLimit; });
+        firstPressTime = -start.timeIntervalSinceNow;
         if (firstError == kAXErrorSuccess) {
             accepted = 1;
             if (!WaitForBurstTime(start, BurstHoldThreshold)) {
@@ -1359,17 +1381,13 @@ static int BurstReaction(NSDictionary *reaction, NSInteger requestedRate) {
                     if (-start.timeIntervalSinceNow >= BurstDurationLimit) { stopReason = @"duration-limit"; break; }
                     NSTimeInterval pressTime = -start.timeIntervalSinceNow;
                     attempted += 1;
-                    AXError reactionError = PressNode(session.target);
+                    AXError reactionError = PressReactionWithRecovery(^AXError { return PressNode(session.target); },
+                        ^AXError { return ReacquireReactionTarget(session); },
+                        ^BOOL { return !BurstStopRequested() && -start.timeIntervalSinceNow < BurstDurationLimit; });
+                    pressTime = -start.timeIntervalSinceNow;
                     if (reactionError != kAXErrorSuccess) {
-                        AXError reacquireError = ReacquireReactionTarget(session);
                         if (BurstStopRequested()) { stopReason = @"key-up"; break; }
                         if (-start.timeIntervalSinceNow >= BurstDurationLimit) { stopReason = @"duration-limit"; break; }
-                        if (reacquireError == kAXErrorSuccess) {
-                            pressTime = -start.timeIntervalSinceNow;
-                            reactionError = PressNode(session.target);
-                        }
-                    }
-                    if (reactionError != kAXErrorSuccess) {
                         stopReason = @"selection-error";
                         exitStatus = 6;
                         break;

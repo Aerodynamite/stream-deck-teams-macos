@@ -65,7 +65,7 @@ type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, st
 type ExecFileLike = (
 	file: string,
 	args: readonly string[],
-	options: { encoding: "utf8"; maxBuffer: number; timeout: number },
+	options: { encoding: "utf8"; maxBuffer: number; timeout: number; killSignal: "SIGKILL" },
 	callback: ExecFileCallback,
 ) => unknown;
 
@@ -209,7 +209,7 @@ function runHelper<T>(args: readonly string[], parser: (stdout: string) => T, op
 	const execFileImpl = options.execFileImpl ?? (execFile as ExecFileLike);
 	ensureExecutable(helperPath);
 	return new Promise((resolve, reject) => {
-		execFileImpl(helperPath, args, { encoding: "utf8", maxBuffer: MAX_OUTPUT_BYTES, timeout: timeoutMs }, (error, stdout, stderr) => {
+		execFileImpl(helperPath, args, { encoding: "utf8", maxBuffer: MAX_OUTPUT_BYTES, timeout: timeoutMs, killSignal: "SIGKILL" }, (error, stdout, stderr) => {
 			if (!error) {
 				try {
 					resolve(parser(stdout));
@@ -222,7 +222,7 @@ function runHelper<T>(args: readonly string[], parser: (stdout: string) => T, op
 			const exitCode = typeof rawCode === "number" ? rawCode : null;
 			const spawnCode = typeof rawCode === "string" && /^E[A-Z0-9]+$/.test(rawCode) ? rawCode : null;
 			const killed = "killed" in error && error.killed === true;
-			const timedOut = killed && "signal" in error && error.signal === "SIGTERM";
+			const timedOut = killed && "signal" in error && (error.signal === "SIGTERM" || error.signal === "SIGKILL");
 			reject(new HelperExecutionError(exitCode, timedOut, safeDiagnostic(exitCode, spawnCode, timedOut, stderr)));
 		});
 	});
@@ -288,12 +288,16 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 	let stopped = false;
 	let settled = false;
 	let killedByTimeout = false;
+	let killTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const completion = new Promise<BurstResult>((resolve, reject) => {
 		const timer = setTimeout(() => {
 			if (settled) return;
 			killedByTimeout = true;
 			child.kill("SIGTERM");
+			if (!settled) killTimer = setTimeout(() => {
+				if (!settled) child.kill("SIGKILL");
+			}, 300);
 		}, timeoutMs);
 		child.stdout.on("data", (chunk) => {
 			if (stdout.length < MAX_OUTPUT_BYTES) stdout += String(chunk).slice(0, MAX_OUTPUT_BYTES - stdout.length);
@@ -305,6 +309,7 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
+			if (killTimer) clearTimeout(killTimer);
 			const spawnCode = typeof error.code === "string" && /^E[A-Z0-9]+$/.test(error.code) ? error.code : null;
 			reject(new HelperExecutionError(null, false, safeDiagnostic(null, spawnCode, false, error.message)));
 		});
@@ -312,7 +317,8 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			if (code === 0) {
+			if (killTimer) clearTimeout(killTimer);
+			if (code === 0 && !killedByTimeout) {
 				try {
 					const result = parseBurstResult(stdout);
 					if (result.reaction !== reaction) throw new HelperExecutionError(null, false, "The Teams helper returned a burst result for a different reaction.");
@@ -322,7 +328,7 @@ export function startReactionBurst(reaction: string, options: BurstRunnerOptions
 				}
 				return;
 			}
-			const timedOut = signal === "SIGTERM" && killedByTimeout;
+			const timedOut = killedByTimeout;
 			reject(new HelperExecutionError(code, timedOut, safeDiagnostic(code, null, timedOut, stderr)));
 		});
 	});

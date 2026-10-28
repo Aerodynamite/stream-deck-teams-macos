@@ -9,7 +9,7 @@ Stream Deck action
     -> JSON result back to Stream Deck
 ```
 
-Reaction holds use one child process for the complete key-down to key-up session. The helper opens the picker once and repeatedly presses the cached reaction element at roughly 143 ms intervals. Slow setup or recovery does not cause catch-up presses. It reopens and reacquires the picker only if the cached element becomes invalid, and dismisses the picker when the session ends. The original full Teams scan remains in the first reaction lookup so the proven popover path is not narrowed.
+Reaction holds use one child process for the complete key-down to key-up session. The helper opens the picker once and repeatedly presses the cached reaction element at roughly 143 ms intervals. Slow setup or recovery does not cause catch-up presses. If a press reports an invalid element or unsupported action, it reacquires the button and retries once, including on the first press. Recovery searches the existing picker before reopening it. Uncertain results such as `CannotComplete` are not replayed. It dismisses the picker when the session ends. The original full Teams scan remains in the first reaction lookup so the proven popover path is not narrowed.
 
 The native helper restricts process discovery to `com.microsoft.teams2` and its child bundle identifiers. Leave selection explicitly rejects end-meeting, end-for-all, decline, and dismiss controls. Equally plausible destructive controls fail as ambiguous instead of choosing one.
 
@@ -63,6 +63,8 @@ The internal `serve` mode accepts bounded newline-delimited JSON for `status`, `
 - A session stops after 5 seconds even if key-up is lost. This budget includes picker setup, so slow setup reduces the total number of reactions.
 - Native hard limits cap the rate at 10 attempts per second and the session at 50 attempts.
 - Only one Teams operation can run at a time.
+- Repeated presses check release and the duration budget before recovery and before retrying. A tap still gets its first reaction when release arrives during setup.
+- The 6500 ms reaction watchdog sends `SIGTERM`, then `SIGKILL` after 300 ms if needed. The lock stays held until the child closes, so a replacement cannot overlap it. Other one-shot helpers use a forced kill at their command timeout. Timed-out commands are not replayed.
 - Reactions inside a Stream Deck Multi Action always send once because there is no physical hold duration.
 
 Success feedback is shown once when the session ends. Logs contain only aggregate reaction type, attempt count, Accessibility acceptance count, elapsed time, and stop reason.
