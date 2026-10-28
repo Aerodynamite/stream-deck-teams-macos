@@ -11,11 +11,11 @@ The plugin provides these keypad actions:
 - Like, Love, Applause, Laugh, and Surprise reactions
 - A bounded reaction wave when a reaction key is held
 
-The plugin does not use mouse coordinates, screen capture, image recognition, Teams account credentials, a network API, or a separate companion application. Stream Deck starts the bundled native helper only when an action or state refresh needs it.
+The plugin does not use mouse coordinates, screen capture, image recognition, Teams account credentials, a network API, or a separate companion application. Stream Deck owns a bundled native child process while meeting-control keys are visible. Hand, Leave, and reaction operations use separate bounded one-shot invocations.
 
 ## Current status
 
-Version `0.2.0.4` implements the new actions, plugin-controlled two-state keys, explicit desired-state commands, JSON state results, control-specific safety rules, optional process-targeted keyboard fallbacks, and native long-press reaction sessions.
+Version `0.2.0.8` includes a persistent native helper for status, microphone, and camera commands, with validated control caching, idle state observation, and bounded process recovery. The plugin also provides explicit desired-state commands, control-specific safety rules, optional process-targeted keyboard fallbacks, and native long-press reaction sessions.
 
 Automated tests cover command allow-listing, JSON validation, process locking, burst cancellation and timeout handling, exact control selection, state derivation, and the original regression that distinguishes the meeting **React** button from **Raise your hand** and **React to this message**.
 
@@ -27,9 +27,13 @@ The implementation still needs live qualification in real Teams meetings before 
 
 ## Teams toolbar compatibility
 
+Accessibility traversal and popup discovery compare full element identities, so hash collisions cannot hide a toolbar or mistake a new popup control for an old one. Traversal still bounds depth and element count and stops cycles.
+
+Reaction launcher selection requires a matching action label and rejects menu items and chat controls. Recent-item titles containing reaction words must not count as meeting controls or mark a meeting active.
+
 The helper reads Chromium's `AXCustomContent` descriptions as well as visible labels, and falls back to `AXDOMIdentifier` when `AXIdentifier` is absent. Teams can keep a short label such as `Raise` unchanged while its custom description switches between `Raise your hand` and `Lower your hand`.
 
-The React control can expose hand state directly in its custom description. When a hand change needs the control inside React, the helper opens the picker and dismisses it afterward with Escape sent only to Teams. Reactions open React directly without scrolling first, since scrolling immediately before pressing can invalidate the new toolbar's action path. Hand changes have a 15-second helper timeout to allow the picker and state verification round trip. Meeting-control shortcut fallbacks remain disabled by default.
+The React control can expose hand state directly in its custom description. When a hand change needs the control inside React, the helper opens the picker and dismisses it afterward with Escape sent only to Teams. Cleanup checks a cached picker control and retries at most three times if Teams ignores dismissal, without a full-tree scan or focus changes. Reactions open React directly without scrolling first, since scrolling immediately before pressing can invalidate the new toolbar's action path. Hand changes have a 15-second helper timeout to allow the picker and state verification round trip. Meeting-control shortcut fallbacks remain disabled by default.
 
 Live helper checks on Teams `26276.505.5234.9924` confirmed hand state and both hand commands. One Love reaction was accepted by Accessibility. Second-participant delivery and the remaining live matrix are still unverified.
 
@@ -141,7 +145,13 @@ hand-lower
 leave
 ```
 
-If a user changes Teams directly, the first plugin milestone does not receive that change in real time. The next Stream Deck state refresh or completed command reconciles the visible key. A later `AXObserver` child-process mode can add live synchronization without changing the command contract.
+The persistent helper observes Accessibility and workspace notifications. It debounces reconciliation to at most four times per second and refreshes known controls every two seconds as a fallback while visible keys retain the helper. Notification support varies by Teams version, so direct Teams changes can take up to the fallback interval plus reconciliation time to appear on the deck.
+
+Warm requests compare process/window identities and read fresh control attributes before acting. Changed context, invalid references, structural notifications, wake, and one-shot operations invalidate discovery. Foreground requests rediscover unavailable controls; idle reconciliation does not repeatedly traverse an empty meeting tree. Leave always uses fresh discovery. Hand, Leave, and reactions pause idle observation and invalidate the cache before it resumes.
+
+The Node client permits one request at a time under the existing operation lock. Timeouts, malformed output, and crashes fail the current request without replaying a potentially completed press. It waits for the old child to close before starting another, with a kill watchdog for unresponsive children. Closing stdin or losing the parent stops native serving. The helper closes when the last control disappears; commands without visible keys have a 500 ms reuse window for Multi Actions.
+
+The SDK has no public disconnect callback. A read-only Stream Deck global-settings heartbeat every five seconds, with a three-second deadline, stops the plugin and its children after a lost connection. Device disconnects release that device's visible controls; process shutdown and reaction release/disconnect handling remain bounded. No daemon or login item is installed.
 
 ## Native helper commands
 
@@ -173,6 +183,8 @@ Query state or invoke explicit commands:
 ```
 
 Normal command results are one JSON object on standard output. Diagnostics go to standard error. `inspect-controls` omits meeting window titles, but its matched labels may still reflect the installed Teams language. Review diagnostic output before sharing it.
+
+The internal `serve` mode accepts bounded newline-delimited JSON for `status`, `mute`, `unmute`, `camera-on`, and `camera-off`. Requests have positive integer IDs, a generation token, and an optional boolean `forceFresh`. Responses correlate the ID and generation and contain an exit code and the ordinary state result. Idle state events contain only the state result and generation. `pause` and `resume` frames suspend observation around one-shot operations; generations discard stale events. This protocol does not accept shell commands, arbitrary paths, reactions, hand changes, or Leave.
 
 The native helper retains experimental `blur-on` and `blur-off` commands for research and manual testing. The packaged Stream Deck plugin does not expose a Background Blur action.
 

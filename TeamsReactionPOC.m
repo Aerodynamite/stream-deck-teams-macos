@@ -165,7 +165,7 @@ static void PrintUsage(const char *executablePath) {
     NSString *executable = [[NSString stringWithUTF8String:executablePath] lastPathComponent];
     printf("Microsoft Teams meeting controls for Stream Deck\n\n");
     printf("Usage:\n");
-    printf("  %s status\n", executable.UTF8String);
+    printf("  %s status|serve\n", executable.UTF8String);
     printf("  %s inspect-controls\n", executable.UTF8String);
     printf("  %s mute|unmute|camera-on|camera-off\n", executable.UTF8String);
     printf("  %s blur-on|blur-off|hand-raise|hand-lower|leave\n", executable.UTF8String);
@@ -311,21 +311,33 @@ static void EncourageAccessibilityTree(AXUIElementRef application) {
 
 static void MarkMeetingReactionPicker(NSArray<AXNode *> *nodes);
 
-static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSString *processName, NSString *windowTitle, AXUIElementRef focusedWindow) {
-    NSMutableArray<AXNode *> *result = [NSMutableArray array];
-    NSMutableArray<NSDictionary *> *stack = [NSMutableArray arrayWithObject:@{@"element": (__bridge id)root, @"depth": @0}];
-    NSMutableSet<NSNumber *> *visited = [NSMutableSet set];
+// Keep traversal testable without needing a live Accessibility provider.
+static void WalkElements(id root, NSArray *(^visit)(id element, NSInteger depth)) {
+    NSMutableArray<NSDictionary *> *stack = [NSMutableArray arrayWithObject:@{@"element": root, @"depth": @0}];
+    NSMutableSet *visited = [NSMutableSet set];
     while (stack.count > 0) {
         NSDictionary *entry = stack.lastObject;
         [stack removeLastObject];
-        AXUIElementRef element = (__bridge AXUIElementRef)entry[@"element"];
+        id element = entry[@"element"];
         NSInteger depth = [entry[@"depth"] integerValue];
-        if (depth > MaxTraversalDepth || result.count >= MaxVisitedElements) continue;
-        NSNumber *identity = @(CFHash(element));
+        if (depth > MaxTraversalDepth || visited.count >= MaxVisitedElements) continue;
+        // A hash is only a bucket hint. The set also compares element equality.
+        id identity = element;
         if ([visited containsObject:identity]) continue;
         [visited addObject:identity];
+        NSArray *children = visit(element, depth);
+        for (id child in [children reverseObjectEnumerator]) {
+            [stack addObject:@{@"element": child, @"depth": @(depth + 1)}];
+        }
+    }
+}
+
+static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSString *processName, NSString *windowTitle, AXUIElementRef focusedWindow) {
+    NSMutableArray<AXNode *> *result = [NSMutableArray array];
+    WalkElements((__bridge id)root, ^NSArray *(id object, NSInteger depth) {
+        AXUIElementRef element = (__bridge AXUIElementRef)object;
         AXNode *node = [AXNode new];
-        node.elementObject = CFBridgingRelease(CFRetain(element));
+        node.elementObject = object;
         node.pid = pid;
         node.processName = processName;
         node.windowTitle = windowTitle;
@@ -336,12 +348,13 @@ static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSStri
         node.focusedWindow = SameElement(focusedWindow, root);
         [result addObject:node];
         id children = attributes[(__bridge NSString *)kAXChildrenAttribute];
-        if (![children isKindOfClass:NSArray.class]) children = @[];
-        for (id childObject in [children reverseObjectEnumerator]) {
-            if (CFGetTypeID((__bridge CFTypeRef)childObject) != AXUIElementGetTypeID()) continue;
-            [stack addObject:@{@"element": childObject, @"depth": @(depth + 1)}];
+        if (![children isKindOfClass:NSArray.class]) return @[];
+        NSMutableArray *elements = [NSMutableArray array];
+        for (id child in children) {
+            if (CFGetTypeID((__bridge CFTypeRef)child) == AXUIElementGetTypeID()) [elements addObject:child];
         }
-    }
+        return elements;
+    });
     MarkMeetingReactionPicker(result);
     return result;
 }
@@ -429,7 +442,9 @@ static NSInteger BaseControlScore(AXNode *node) {
 }
 
 static NSInteger LauncherScore(AXNode *node) {
-    if (!ContainsAny(node.searchableText, LauncherLabels())) return NSIntegerMin;
+    // Recent-item menu titles can contain reaction words without being controls.
+    if ([node.role isEqualToString:(__bridge NSString *)kAXMenuItemRole] || HasUnsafeContext(node)) return NSIntegerMin;
+    if (!NodeMatchesAction(node, LauncherLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     if (score == NSIntegerMin) return score;
     for (NSString *field in @[node.title, node.nodeDescription, node.helpText, node.customDescription ?: @"", node.value]) {
@@ -695,7 +710,10 @@ static NSMutableDictionary *ResultForScan(NSDictionary *scan, NSString *command,
     return result;
 }
 
+static void (^CommandResultSink)(NSDictionary *) = nil;
+
 static void WriteJSON(NSDictionary *object) {
+    if (CommandResultSink) { CommandResultSink(object); return; }
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:object options:0 error:&error];
     if (!data || error) {
@@ -739,14 +757,36 @@ static BOOL PostTeamsShortcut(pid_t pid, CGKeyCode keyCode) {
 }
 
 static pid_t OpenMeetingPickerPID = 0;
+static AXNode *OpenMeetingPickerTarget = nil;
 static NSDictionary *MeetingToolbarScan = nil;
+
+static BOOL PickerTargetStillPresent(AXNode *target) {
+    if (!target) return NO;
+    AXNode *fresh = RefreshNode(target);
+    if (!fresh.canPress || ![fresh.role isEqualToString:target.role]) return NO;
+    if (NodeMatchesAction(fresh, RaiseHandLabels()) || NodeMatchesAction(fresh, LowerHandLabels())) return YES;
+    for (NSString *key in ReactionDefinitions()) {
+        if (NodeMatchesAction(fresh, ReactionDefinitions()[key][@"labels"])) return YES;
+    }
+    return NO;
+}
+
+static void DismissPickerUntilGone(void (^sendEscape)(void), BOOL (^stillPresent)(void)) {
+    for (NSInteger attempt = 0; attempt < 3; attempt += 1) {
+        sendEscape();
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
+        if (!stillPresent()) break;
+    }
+}
 
 static void DismissMeetingPicker(void) {
     if (OpenMeetingPickerPID <= 0) return;
-    // Escape dismisses only the confirmed Teams picker, never a meeting control.
-    PostTeamsKey(OpenMeetingPickerPID, 53, 0);
+    pid_t pid = OpenMeetingPickerPID;
+    AXNode *target = OpenMeetingPickerTarget;
     OpenMeetingPickerPID = 0;
-    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
+    OpenMeetingPickerTarget = nil;
+    // Retry only while a confirmed picker control still exists in Teams.
+    DismissPickerUntilGone(^{ PostTeamsKey(pid, 53, 0); }, ^BOOL { return PickerTargetStillPresent(target); });
 }
 
 static NSDictionary *WithMeetingToolbarState(NSDictionary *scan) {
@@ -765,6 +805,12 @@ static NSDictionary *ScanMeetingControlsInScan(NSDictionary *scan, BOOL includeH
     BOOL pickerVisible = NO;
     for (AXNode *node in scan[@"elements"]) {
         if (node.meetingReactionPicker) { OpenMeetingPickerPID = node.pid; pickerVisible = YES; break; }
+    }
+    if (pickerVisible) {
+        OpenMeetingPickerTarget = BestNode(scan[@"elements"], ^NSInteger(AXNode *node) {
+            if (!node.meetingReactionPicker || node.pid != OpenMeetingPickerPID) return NSIntegerMin;
+            return HandScore(node);
+        });
     }
     if (pickerVisible && includeHand && MeetingToolbarScan) return WithMeetingToolbarState(scan);
     if (OpenMeetingPickerPID > 0) {
@@ -786,7 +832,10 @@ static NSDictionary *ScanMeetingControlsInScan(NSDictionary *scan, BOOL includeH
         pickerScan = ScanTeams();
         BOOL handAmbiguous = NO;
         AXNode *pickerHand = BestUniqueNode(pickerScan[@"elements"], ^NSInteger(AXNode *node) { return HandScore(node); }, &handAmbiguous);
-        if (pickerHand || handAmbiguous) return WithMeetingToolbarState(pickerScan);
+        if (pickerHand || handAmbiguous) {
+            OpenMeetingPickerTarget = pickerHand;
+            return WithMeetingToolbarState(pickerScan);
+        }
     } while (deadline.timeIntervalSinceNow > 0);
     return scan;
 }
@@ -795,10 +844,75 @@ static NSDictionary *ScanMeetingControls(BOOL includeHand) {
     return ScanMeetingControlsInScan(ScanTeams(), includeHand);
 }
 
+static BOOL PersistentMode = NO;
+static BOOL PersistentParentClosed = NO;
+static pid_t PersistentParentPID = 0;
+static BOOL PersistentInvalid = YES;
+static BOOL PersistentStateDirty = NO;
+static BOOL PersistentPaused = NO;
+static long long PersistentGeneration = 0;
+static BOOL PersistentForcePublish = NO;
+static NSDictionary *PersistentScan = nil;
+static NSArray<AXNode *> *PersistentNodes = nil;
+static NSArray *PersistentContext = nil;
+static void InstallPersistentObservers(void);
+
+// Context contains process and window identities, never their titles.
+static NSArray *TeamsContext(void) {
+    NSMutableArray *context = [NSMutableArray array];
+    for (NSDictionary *application in CandidateApplications()) {
+        AXUIElementRef root = (__bridge AXUIElementRef)application[@"root"];
+        [context addObject:@{@"pid": application[@"pid"],
+            @"windows": ElementArrayAttribute(root, kAXWindowsAttribute),
+            @"focused": CopyAttribute(root, kAXFocusedWindowAttribute) ?: NSNull.null}];
+    }
+    return context;
+}
+
+static BOOL RefreshedControlsMatch(NSArray<AXNode *> *previous, NSArray<AXNode *> *fresh) {
+    if (previous.count != fresh.count) return NO;
+    for (NSUInteger index = 0; index < previous.count; index += 1) {
+        AXNode *old = previous[index], *current = fresh[index];
+        if (![old.role isEqualToString:current.role] || ![old.identifier isEqualToString:current.identifier]
+            || old.pid != current.pid || !current.canPress) return NO;
+        if ((MicrophoneScore(old) > 0 && MicrophoneScore(current) <= 0)
+            || (CameraScore(old) > 0 && CameraScore(current) <= 0)
+            || (HandScore(old) > 0 && HandScore(current) <= 0)
+            || (LauncherScore(old) > 0 && LauncherScore(current) <= 0)
+            || (LeaveScore(old) > 0 && LeaveScore(current) <= 0)) return NO;
+    }
+    return YES;
+}
+
+static BOOL PersistentNeedsDiscovery(BOOL foreground, NSDictionary *state, NSUInteger count) {
+    return foreground && (count == 0 || [state[@"microphone"] isEqualToString:@"unavailable"]
+        || [state[@"camera"] isEqualToString:@"unavailable"]);
+}
+
+static NSDictionary *PersistentControlScan(BOOL allowPickerDismissal, BOOL foreground) {
+    NSArray *context = TeamsContext();
+    BOOL missing = PersistentScan && PersistentNeedsDiscovery(foreground, StateSnapshot(PersistentScan), PersistentNodes.count);
+    if (!PersistentInvalid && !missing && PersistentScan && [context isEqualToArray:PersistentContext]) {
+        NSDictionary *fresh = RefreshControlScan(PersistentScan, PersistentNodes, ^AXNode *(AXNode *node) { return RefreshNode(node); });
+        if (RefreshedControlsMatch(PersistentNodes, fresh[@"elements"])) {
+            PersistentScan = fresh;
+            PersistentNodes = fresh[@"elements"];
+            return fresh;
+        }
+    }
+    NSDictionary *scan = allowPickerDismissal ? ScanMeetingControls(NO) : ScanTeams();
+    PersistentNodes = StateControlNodes(scan);
+    PersistentScan = @{@"applicationCount": scan[@"applicationCount"], @"elements": PersistentNodes};
+    PersistentContext = context;
+    PersistentInvalid = NO;
+    InstallPersistentObservers();
+    return scan;
+}
+
 typedef NSString *(^NodeStateReader)(AXNode *node);
 
 static int PerformDesiredControl(NSString *command, NSString *desiredState, NSString *family, CGKeyCode shortcutKey, NodeScorer scorer, NodeStateReader stateReader) {
-    NSDictionary *initialScan = ScanMeetingControls(NO);
+    NSDictionary *initialScan = PersistentMode ? PersistentControlScan(YES, YES) : ScanMeetingControls(NO);
     if ([family isEqualToString:@"hand"]) {
         if ([StateSnapshot(initialScan)[@"hand"] isEqualToString:desiredState]) {
             WriteJSON(ResultForScan(initialScan, command, NO));
@@ -833,6 +947,7 @@ static int PerformDesiredControl(NSString *command, NSString *desiredState, NSSt
         fprintf(stderr, "The current %s state could not be determined safely.\n", family.UTF8String);
         return 10;
     }
+    if (PersistentMode && (PersistentParentClosed || getppid() != PersistentParentPID)) return 12;
     if (!control.meetingReactionPicker) ScrollNodeIntoView(control);
     AXError pressError = PressNode(control);
     BOOL usedShortcut = NO;
@@ -864,6 +979,10 @@ static int PerformDesiredControl(NSString *command, NSString *desiredState, NSSt
         BOOL confirmed = !currentAmbiguous && currentControl && [stateReader(currentControl) isEqualToString:desiredState];
         if ([family isEqualToString:@"hand"] && !currentAmbiguous) confirmed = [StateSnapshot(currentScan)[@"hand"] isEqualToString:desiredState];
         if (confirmed) {
+            if (PersistentMode) {
+                PersistentScan = currentScan;
+                PersistentNodes = StateControlNodes(currentScan);
+            }
             WriteJSON(ResultForScan(currentScan, command, YES));
             return 0;
         }
@@ -923,14 +1042,14 @@ static int PerformLeave(void) {
     return 13;
 }
 
-static AXNode *FindEffectOption(NSArray<AXNode *> *elements, BOOL enable, NSSet<NSNumber *> *initialIdentities, BOOL *ambiguous) {
+static AXNode *FindEffectOption(NSArray<AXNode *> *elements, BOOL enable, NSSet *initialIdentities, BOOL *ambiguous) {
     NodeScorer baseScorer = enable
         ? ^NSInteger(AXNode *node) { return BlurOptionScore(node); }
         : ^NSInteger(AXNode *node) { return NoEffectOptionScore(node); };
     return BestUniqueNode(elements, ^NSInteger(AXNode *node) {
         NSInteger score = baseScorer(node);
         if (score == NSIntegerMin) return score;
-        BOOL isNew = ![initialIdentities containsObject:@(CFHash(node.element))];
+        BOOL isNew = ![initialIdentities containsObject:node.elementObject];
         NSString *identifier = node.identifier.lowercaseString;
         BOOL effectIdentifier = [identifier containsString:@"effect"] || [identifier containsString:@"background"] || [identifier containsString:@"blur"];
         if (isNew) score += 80;
@@ -952,8 +1071,8 @@ static int PerformBlur(BOOL enable) {
         WriteJSON(ResultForScan(initialScan, command, NO));
         return 0;
     }
-    NSMutableSet<NSNumber *> *initialIdentities = [NSMutableSet set];
-    for (AXNode *node in initialScan[@"elements"]) [initialIdentities addObject:@(CFHash(node.element))];
+    NSMutableSet *initialIdentities = [NSMutableSet set];
+    for (AXNode *node in initialScan[@"elements"]) [initialIdentities addObject:node.elementObject];
     NodeScorer targetScorer = enable
         ? ^NSInteger(AXNode *node) { return BlurOptionScore(node); }
         : ^NSInteger(AXNode *node) { return NoEffectOptionScore(node); };
@@ -1017,7 +1136,7 @@ static int PerformBlur(BOOL enable) {
     AXNode *apply = BestUniqueNode(currentScan[@"elements"], ^NSInteger(AXNode *node) {
         NSInteger score = ApplyScore(node);
         if (score == NSIntegerMin) return score;
-        BOOL isNew = ![initialIdentities containsObject:@(CFHash(node.element))];
+        BOOL isNew = ![initialIdentities containsObject:node.elementObject];
         NSString *identifier = node.identifier.lowercaseString;
         BOOL effectIdentifier = [identifier containsString:@"effect"] || [identifier containsString:@"background"];
         if (!isNew && !effectIdentifier) return NSIntegerMin;
@@ -1115,7 +1234,7 @@ static int Inspect(void) {
 @implementation ReactionSession
 @end
 
-static AXNode *FindReactionTarget(NSDictionary *reaction, AXNode *launcher, NSSet<NSNumber *> *initialIdentities, NSTimeInterval timeout, BOOL fullScan) {
+static AXNode *FindReactionTarget(NSDictionary *reaction, AXNode *launcher, NSSet *initialIdentities, NSTimeInterval timeout, BOOL fullScan) {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
     AXNode *target = nil;
     do {
@@ -1124,13 +1243,14 @@ static AXNode *FindReactionTarget(NSDictionary *reaction, AXNode *launcher, NSSe
             NSInteger score = ReactionScore(node, reaction);
             if (score == NSIntegerMin) return score;
             if (node.pid == launcher.pid) score += 20;
-            if (initialIdentities && ![initialIdentities containsObject:@(CFHash(node.element))]) score += 80;
+            if (initialIdentities && ![initialIdentities containsObject:node.elementObject]) score += 80;
             return score;
         });
         if (!target && deadline.timeIntervalSinceNow > 0) {
             [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:MIN(0.02, deadline.timeIntervalSinceNow)]];
         }
     } while (!target && deadline.timeIntervalSinceNow > 0);
+    if (target) OpenMeetingPickerTarget = target;
     return target;
 }
 
@@ -1140,8 +1260,8 @@ static int PrepareReactionSession(NSDictionary *reaction, ReactionSession **sess
     BOOL ambiguous = NO;
     AXNode *launcher = BestUniqueNode(initialScan[@"elements"], ^NSInteger(AXNode *node) { return LauncherScore(node); }, &ambiguous);
     if (ambiguous || !launcher) return ambiguous ? 11 : 3;
-    NSMutableSet<NSNumber *> *initialIdentities = [NSMutableSet set];
-    for (AXNode *node in initialScan[@"elements"]) [initialIdentities addObject:@(CFHash(node.element))];
+    NSMutableSet *initialIdentities = [NSMutableSet set];
+    for (AXNode *node in initialScan[@"elements"]) [initialIdentities addObject:node.elementObject];
     if (PressNode(launcher) != kAXErrorSuccess) return 4;
     OpenMeetingPickerPID = launcher.pid;
     AXNode *target = FindReactionTarget(reaction, launcher, initialIdentities, MenuTimeout, YES);
@@ -1270,6 +1390,218 @@ static int BurstReaction(NSDictionary *reaction, NSInteger requestedRate) {
     return exitStatus;
 }
 
+static NSMutableArray *PersistentObservers;
+
+static void PersistentAXChanged(AXObserverRef observer, AXUIElementRef element, CFStringRef notification, void *context) {
+    (void)observer; (void)element; (void)context;
+    PersistentStateDirty = YES;
+    if (!CFEqual(notification, kAXValueChangedNotification) && !CFEqual(notification, kAXTitleChangedNotification)
+        && !CFEqual(notification, CFSTR("AXDescriptionChanged"))) PersistentInvalid = YES;
+}
+
+static void RemovePersistentObservers(void) {
+    for (id object in PersistentObservers) {
+        AXObserverRef observer = (__bridge AXObserverRef)object;
+        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(observer), kCFRunLoopDefaultMode);
+    }
+    PersistentObservers = nil;
+}
+
+static void InstallPersistentObservers(void) {
+    if (!PersistentMode) return;
+    RemovePersistentObservers();
+    PersistentObservers = [NSMutableArray array];
+    for (NSDictionary *application in CandidateApplications()) {
+        pid_t pid = [application[@"pid"] intValue];
+        AXObserverRef observer = NULL;
+        if (AXObserverCreate(pid, PersistentAXChanged, &observer) != kAXErrorSuccess || !observer) continue;
+        [PersistentObservers addObject:CFBridgingRelease(observer)];
+        AXUIElementRef root = (__bridge AXUIElementRef)application[@"root"];
+        for (NSString *notification in @[(__bridge NSString *)kAXFocusedWindowChangedNotification, (__bridge NSString *)kAXWindowCreatedNotification]) {
+            AXObserverAddNotification(observer, root, (__bridge CFStringRef)notification, NULL);
+        }
+        for (id window in ElementArrayAttribute(root, kAXWindowsAttribute)) {
+            for (NSString *notification in @[(__bridge NSString *)kAXUIElementDestroyedNotification,
+                    (__bridge NSString *)kAXLayoutChangedNotification, (__bridge NSString *)kAXWindowMiniaturizedNotification,
+                    (__bridge NSString *)kAXWindowDeminiaturizedNotification]) {
+                AXObserverAddNotification(observer, (__bridge AXUIElementRef)window, (__bridge CFStringRef)notification, NULL);
+            }
+        }
+        for (AXNode *node in PersistentNodes) {
+            if (node.pid != pid) continue;
+            for (NSString *notification in @[(__bridge NSString *)kAXValueChangedNotification, (__bridge NSString *)kAXTitleChangedNotification,
+                    (__bridge NSString *)kAXUIElementDestroyedNotification, @"AXDescriptionChanged"]) {
+                AXObserverAddNotification(observer, node.element, (__bridge CFStringRef)notification, NULL);
+            }
+        }
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(observer), kCFRunLoopDefaultMode);
+    }
+}
+
+static BOOL IsPersistentCommand(NSString *command) {
+    return [@[@"status", @"mute", @"unmute", @"camera-on", @"camera-off"] containsObject:command];
+}
+
+static BOOL ValidPersistentGeneration(id generation) {
+    if (!generation) return YES;
+    if (![generation isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)generation) == CFBooleanGetTypeID()) return NO;
+    double value = [generation doubleValue];
+    return value >= 0 && value <= 9007199254740991.0 && floor(value) == value;
+}
+
+static BOOL ValidPersistentRequest(NSDictionary *request) {
+    id identifier = request[@"id"];
+    if (![identifier isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)identifier) == CFBooleanGetTypeID()) return NO;
+    double value = [identifier doubleValue];
+    if (value < 1 || value > 9007199254740991.0 || floor(value) != value) return NO;
+    if (![request[@"command"] isKindOfClass:NSString.class] || !IsPersistentCommand(request[@"command"])) return NO;
+    id generation = request[@"generation"];
+    if (!ValidPersistentGeneration(generation)) return NO;
+    id fresh = request[@"forceFresh"];
+    return !fresh || ([fresh isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)fresh) == CFBooleanGetTypeID());
+}
+
+@interface PersistentInput : NSObject
+@property(nonatomic, strong) NSMutableData *buffer;
+@property(nonatomic, strong) NSMutableArray<NSDictionary *> *requests;
+@property(nonatomic) BOOL malformed;
+@end
+@implementation PersistentInput
+@end
+
+static void ReadPersistentInput(CFFileDescriptorRef descriptor, CFOptionFlags flags, void *context) {
+    (void)flags;
+    PersistentInput *input = (__bridge PersistentInput *)context;
+    char bytes[4096];
+    ssize_t count;
+    while ((count = read(STDIN_FILENO, bytes, sizeof(bytes))) > 0) {
+        [input.buffer appendBytes:bytes length:(NSUInteger)count];
+        if (input.buffer.length > 8192) { input.malformed = YES; break; }
+        while (input.buffer.length > 0) {
+            const char *data = input.buffer.bytes;
+            const char *newline = memchr(data, '\n', input.buffer.length);
+            if (!newline) break;
+            NSUInteger length = (NSUInteger)(newline - data);
+            NSData *line = [input.buffer subdataWithRange:NSMakeRange(0, length)];
+            [input.buffer replaceBytesInRange:NSMakeRange(0, length + 1) withBytes:NULL length:0];
+            id message = [NSJSONSerialization JSONObjectWithData:line options:0 error:NULL];
+            if (![message isKindOfClass:NSDictionary.class]) { input.malformed = YES; break; }
+            if (!ValidPersistentGeneration(message[@"generation"])) { input.malformed = YES; break; }
+            if ([message[@"kind"] isEqual:@"pause"]) {
+                PersistentGeneration = [message[@"generation"] longLongValue];
+                PersistentPaused = YES;
+            } else if ([message[@"kind"] isEqual:@"resume"]) {
+                PersistentGeneration = [message[@"generation"] longLongValue];
+                PersistentPaused = NO;
+                PersistentForcePublish = YES;
+                PersistentInvalid = YES;
+                PersistentStateDirty = YES;
+            } else if (ValidPersistentRequest(message) && input.requests.count < 4) {
+                [input.requests addObject:message];
+            } else {
+                input.malformed = YES;
+                break;
+            }
+        }
+        if (input.malformed) break;
+    }
+    if (count == 0 || (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) PersistentParentClosed = YES;
+    if (!PersistentParentClosed && !input.malformed) CFFileDescriptorEnableCallBacks(descriptor, kCFFileDescriptorReadCallBack);
+}
+
+static int ExecutePersistentCommand(NSString *command) {
+    if ([command isEqualToString:@"status"]) {
+        NSDictionary *scan = PersistentMode ? PersistentControlScan(YES, YES) : ScanMeetingControls(NO);
+        WriteJSON(ResultForScan(scan, command, NO));
+        return [scan[@"applicationCount"] integerValue] == 0 ? 2 : 0;
+    }
+    if ([command isEqualToString:@"mute"]) return PerformDesiredControl(command, @"muted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
+    if ([command isEqualToString:@"unmute"]) return PerformDesiredControl(command, @"unmuted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
+    if ([command isEqualToString:@"camera-on"]) return PerformDesiredControl(command, @"on", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
+    if ([command isEqualToString:@"camera-off"]) return PerformDesiredControl(command, @"off", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
+    return 64;
+}
+
+static int ServeControls(void) {
+    PersistentMode = YES;
+    PersistentParentPID = getppid();
+    PersistentParentClosed = NO;
+    int originalFlags = fcntl(STDIN_FILENO, F_GETFL);
+    if (originalFlags < 0 || fcntl(STDIN_FILENO, F_SETFL, originalFlags | O_NONBLOCK) < 0) return 64;
+    PersistentInput *input = [PersistentInput new];
+    input.buffer = [NSMutableData data];
+    input.requests = [NSMutableArray array];
+    CFFileDescriptorContext descriptorContext = {0, (__bridge void *)input, NULL, NULL, NULL};
+    CFFileDescriptorRef descriptor = CFFileDescriptorCreate(NULL, STDIN_FILENO, false, ReadPersistentInput, &descriptorContext);
+    if (!descriptor) return 64;
+    CFRunLoopSourceRef source = CFFileDescriptorCreateRunLoopSource(NULL, descriptor, 0);
+    if (!source) { CFRelease(descriptor); return 64; }
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
+    CFFileDescriptorEnableCallBacks(descriptor, kCFFileDescriptorReadCallBack);
+    NSMutableArray *workspaceTokens = [NSMutableArray array];
+    NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+    for (NSString *name in @[NSWorkspaceDidWakeNotification, NSWorkspaceDidLaunchApplicationNotification, NSWorkspaceDidTerminateApplicationNotification]) {
+        id token = [center addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *notification) {
+            NSRunningApplication *app = notification.userInfo[NSWorkspaceApplicationKey];
+            if (![notification.name isEqualToString:NSWorkspaceDidWakeNotification]
+                && ![app.bundleIdentifier.lowercaseString hasPrefix:@"com.microsoft.teams2"]) return;
+            PersistentInvalid = YES;
+            PersistentStateDirty = YES;
+        }];
+        [workspaceTokens addObject:token];
+    }
+    NSDictionary *lastState = nil;
+    NSTimeInterval nextFallback = NSProcessInfo.processInfo.systemUptime + 2.0;
+    NSTimeInterval nextNotificationRefresh = 0;
+    while (!PersistentParentClosed && !input.malformed && getppid() == PersistentParentPID) {
+        @autoreleasepool {
+            if (input.requests.count > 0) {
+                NSDictionary *request = input.requests.firstObject;
+                [input.requests removeObjectAtIndex:0];
+                PersistentGeneration = [request[@"generation"] longLongValue];
+                if ([request[@"forceFresh"] boolValue]) PersistentInvalid = YES;
+                __block NSDictionary *result = nil;
+                int exitCode = 64;
+                CommandResultSink = ^(NSDictionary *object) { result = object; };
+                @try { exitCode = ExecutePersistentCommand(request[@"command"]); }
+                @finally { CommandResultSink = nil; DismissMeetingPicker(); }
+                WriteJSON(@{@"id": request[@"id"], @"generation": request[@"generation"] ?: @0, @"exitCode": @(exitCode), @"result": result ?: @{} });
+                if (result) lastState = StateSnapshot(PersistentScan);
+                nextFallback = NSProcessInfo.processInfo.systemUptime + 2.0;
+                continue;
+            }
+            NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+            if (!PersistentPaused && PersistentScan
+                && ((PersistentStateDirty && now >= nextNotificationRefresh) || now >= nextFallback)) {
+                PersistentStateDirty = NO;
+                NSDictionary *scan = PersistentControlScan(NO, NO);
+                NSDictionary *state = StateSnapshot(scan);
+                if (PersistentForcePublish || ![state isEqualToDictionary:lastState]) {
+                    PersistentForcePublish = NO;
+                    WriteJSON(@{@"event": @"state", @"generation": @(PersistentGeneration), @"result": ResultForScan(scan, @"status", NO)});
+                    lastState = state;
+                }
+                nextNotificationRefresh = NSProcessInfo.processInfo.systemUptime + 0.25;
+                nextFallback = NSProcessInfo.processInfo.systemUptime + 2.0;
+            }
+            NSTimeInterval delay = PersistentPaused || !PersistentScan ? 30.0 : MAX(0.001, nextFallback - NSProcessInfo.processInfo.systemUptime);
+            if (PersistentStateDirty && !PersistentPaused) delay = MIN(delay, MAX(0.001, nextNotificationRefresh - NSProcessInfo.processInfo.systemUptime));
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, delay, true);
+        }
+    }
+    for (id token in workspaceTokens) [center removeObserver:token];
+    RemovePersistentObservers();
+    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
+    CFFileDescriptorInvalidate(descriptor);
+    CFRelease(source);
+    CFRelease(descriptor);
+    fcntl(STDIN_FILENO, F_SETFL, originalFlags);
+    PersistentScan = nil; PersistentNodes = nil; PersistentContext = nil;
+    PersistentMode = NO;
+    if (input.malformed) fprintf(stderr, "Invalid persistent control protocol.\n");
+    return input.malformed ? 64 : 0;
+}
+
 #ifndef TEAMS_REACTION_TESTING
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
@@ -1282,7 +1614,7 @@ int main(int argc, const char *argv[]) {
             PrintUsage(argv[0]);
             return 0;
         }
-        NSSet<NSString *> *singleArgumentCommands = [NSSet setWithArray:@[@"status", @"inspect", @"inspect-controls", @"mute", @"unmute", @"camera-on", @"camera-off", @"blur-on", @"blur-off", @"hand-raise", @"hand-lower", @"leave"]];
+        NSSet<NSString *> *singleArgumentCommands = [NSSet setWithArray:@[@"serve", @"status", @"inspect", @"inspect-controls", @"mute", @"unmute", @"camera-on", @"camera-off", @"blur-on", @"blur-off", @"hand-raise", @"hand-lower", @"leave"]];
         BOOL directReaction = ReactionDefinitions()[command] != nil;
         BOOL validArity = (argc == 2 && ([singleArgumentCommands containsObject:command] || directReaction))
             || (argc == 3 && ([command isEqualToString:@"react"] || [command isEqualToString:@"burst"]))
@@ -1305,20 +1637,8 @@ int main(int argc, const char *argv[]) {
         @try {
             if ([command isEqualToString:@"inspect"]) return Inspect();
             if ([command isEqualToString:@"inspect-controls"]) return InspectControls();
-            if ([command isEqualToString:@"status"]) {
-                NSDictionary *scan = ScanMeetingControls(NO);
-                if ([scan[@"applicationCount"] integerValue] == 0) {
-                    WriteJSON(ResultForScan(scan, command, NO));
-                    fprintf(stderr, "Microsoft Teams is not running.\n");
-                    return 2;
-                }
-                WriteJSON(ResultForScan(scan, command, NO));
-                return 0;
-            }
-            if ([command isEqualToString:@"mute"]) return PerformDesiredControl(command, @"muted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
-            if ([command isEqualToString:@"unmute"]) return PerformDesiredControl(command, @"unmuted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
-            if ([command isEqualToString:@"camera-on"]) return PerformDesiredControl(command, @"on", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
-            if ([command isEqualToString:@"camera-off"]) return PerformDesiredControl(command, @"off", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
+            if ([command isEqualToString:@"serve"]) return ServeControls();
+            if (IsPersistentCommand(command)) return ExecutePersistentCommand(command);
             if ([command isEqualToString:@"hand-raise"]) return PerformDesiredControl(command, @"raised", @"hand", 40, ^NSInteger(AXNode *node) { return HandScore(node); }, ^NSString *(AXNode *node) { return HandStateForNode(node); });
             if ([command isEqualToString:@"hand-lower"]) return PerformDesiredControl(command, @"lowered", @"hand", 40, ^NSInteger(AXNode *node) { return HandScore(node); }, ^NSString *(AXNode *node) { return HandStateForNode(node); });
             if ([command isEqualToString:@"leave"]) return PerformLeave();

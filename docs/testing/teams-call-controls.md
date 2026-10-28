@@ -152,3 +152,143 @@ These are process launch through confirmed JSON result timings, not visual frame
 The native regression fixture previously took 833 ms to parse a 1000-node meeting and failed its 250 ms budget; it now passes. Tests also cover batched missing/error attributes, fresh verification state, disappeared controls, and preserved ambiguity.
 
 Physical Stream Deck key-to-frame timing, toolbar and focus variants, other languages, Leave safety, and reaction delivery after these optimizations remain unverified. Reactions benefit from faster scans and check for the picker immediately; their tap and hold behavior still needs live qualification on this build.
+
+## 2026-10-28 persistent helper qualification
+
+Implementation plan: [persistent controls](../plans/persistent-controls.md).
+Final packaged version: `0.2.0.6`. Client remains Teams `26276.505.5234.9924`,
+English UI, with an active meeting. Approved microphone/camera checks restored
+their starting states: microphone unmuted, camera on. Leave was not pressed.
+
+The persistent helper caches control references, compares process/window context,
+and reads fresh attributes before each request. It observes Accessibility and
+workspace changes, with debouncing and a two-second targeted fallback. Idle
+observation pauses around hand, Leave, and reaction operations. The shared lock,
+state confirmation, reaction cancellation, and five-second guard remain in place.
+
+Measured results during implementation:
+
+| Check | Result |
+|---|---|
+| Cold persistent status | 730 ms in the initial run |
+| Warm persistent status | 17 to 50 ms initially; later checks 19 to 29 ms |
+| Warm mute/camera command completion | 165 to 249 ms in the first six-command run |
+| Focused microphone trace | Mute 125 ms; unmute 84 ms |
+| Synchronous Accessibility press | Under 1 ms in the focused trace |
+| State confirmation after press | 24 to 106 ms in the focused trace |
+| External microphone changes through a separate helper | Observed at 480 and 386 ms from starting the external command, including its discovery cost |
+| Explicit cache invalidation | Cold status 413 ms, then warm status 19 ms |
+| Graceful stop followed by a new request | Fresh helper status completed in 362 ms |
+| Ten-second idle sample | About 0.3% CPU, 12 MiB RSS, zero redundant state events |
+| Closing stdin | Helper exited successfully without a diagnostic |
+
+A local WebSocket fixture exercised the built plugin through actual SDK
+`willAppear` and `keyDown` events against live Teams. Four consecutive microphone
+presses reached confirmed state feedback in 247, 242, 150, and 46 ms. The microphone
+returned to its starting state. Closing the simulated Stream Deck connection
+stopped the plugin through its heartbeat after 6900 ms. These are simulated
+event-to-feedback timings, not physical key-to-screen frame timings. The live
+checks used the same cache/command paths before the final Node restart guards.
+
+The under-100-ms target is not consistently achieved. Removing discovery makes
+warm requests much cheaper, but Teams exposes changed state asynchronously and
+confirmation latency varies. Cold discovery and invalidated contexts still take
+hundreds of milliseconds. Keep those limits distinct from the warm state-read
+timings.
+
+Automated coverage includes allowed commands, bounded and fragmented protocol
+messages, correlation/generation validation, stale event rejection, context and
+control invalidation predicates, preserved ambiguity, shared locking, missing
+key-up, timeout termination and forced kill, crash recovery without replay,
+visibility ownership, ephemeral Multi Actions, connection heartbeat loss, and
+restart races. Native tests, all 34 Node tests, TypeScript checking, build,
+packaging, and package validation passed.
+
+Installed `0.2.0.6` was verified against the rebuilt manifest version and both
+binary hashes. New plugin PID 56591 owned helper PID 56601; both remained stable
+across a nine-second heartbeat check with the real Stream Deck application.
+
+Still unverified live: physical Stream Deck timing, prolonged idle/soak behavior,
+multiple devices and real profile/device disconnects, Teams relaunch and meeting
+transitions, sleep/wake, minimized/compact/multiple windows and focus variants,
+other languages, Leave safety, and reaction delivery and hold lifecycle on this
+build. Synthetic invalidation and lifecycle tests do not qualify those live cases.
+
+## 2026-10-28 reaction ambiguity follow-up
+
+Installed `0.2.0.6` logs showed successful microphone/camera commands and ten
+successful reaction taps, followed by repeated reaction exit code 11 failures.
+The original plugin and persistent helper were still alive during diagnosis.
+Three read-only inspections reproduced two false reaction candidates: native
+recent-item menu entries. No actual microphone, camera, or hand controls were
+exposed at inspection time, despite Teams having windows. This does not establish
+whether the meeting was still open when the original failure occurred.
+
+Version `0.2.0.7` requires matching reaction action labels and rejects menu items
+and unsafe chat contexts. Native regression fixtures cover two recent items
+containing reaction words, a menu item named React, and false active-meeting
+detection. The fixtures failed before the change and passed afterward. Existing
+exact meeting React and custom-description hand-state cases still pass.
+
+At that stage the original all-buttons symptom remained unresolved. The user
+subsequently confirmed the meeting had remained open, initially in the background;
+see the collision diagnosis below. Leave was not pressed, and
+reaction delivery, repeated taps/holds in a live meeting, focus/window variants,
+and prolonged operation remain unverified for this follow-up.
+
+The original read-only reproduction was rerun against the rebuilt helper: no
+false controls were reported and `meetingActive` was false. All 34 Node tests,
+native tests, TypeScript checking, packaging, and validation passed. Installed
+version `0.2.0.7` and both installed binary hashes match the rebuilt bundle.
+
+## 2026-10-28 Accessibility identity collision fix
+
+Version `0.2.0.8` fixes the missing-toolbar cause of the all-buttons failure.
+The user confirmed the meeting stayed open. Bringing it forward did not fix
+discovery. A same-window comparison found 66 elements with hash-only visitation
+and 107 with full element identity comparison. Six unequal elements in that
+window shared hashes; skipping a toolbar ancestor hid microphone, camera, and
+React. The main Teams window also contained a collision.
+
+Traversal now keeps the actual elements in its visited set, using equality to
+distinguish hash collisions while still detecting cycles. Initial popup identity
+sets for reaction and effect discovery use the same complete identities. Exact
+control scoring, ambiguity rejection, command allow-listing, operation locking,
+and reaction session guards remain intact.
+
+A regression fixture runs the real traversal with six distinct elements sharing
+one hash, a toolbar with microphone/camera/React descendants, and a cycle back to
+the root. It failed before the correction and passed afterward, including the
+state and React-discovery assertions. Three live read-only inspections then
+consistently found microphone, camera, React, and Leave controls.
+
+With Finder active and Teams in the background, three forced discovery requests
+found the meeting. Approved microphone mute/unmute and camera off/on checks
+confirmed each requested state and restored microphone unmuted and camera on.
+Command completion times were 158, 377, 297, and 442 ms respectively. These are
+helper confirmation timings, not physical key-to-frame measurements.
+
+Leave was not pressed. Second-participant reaction delivery, repeated tap/hold
+soaks, minimized/compact and multiple meeting windows, sleep/wake, and real
+profile/device disconnects remain unverified on this build.
+
+An initial background reaction tap was accepted but its immediate status read
+contained only hand state, indicating the picker had not closed. Later direct
+cleanup checks and a strict Node rerun passed. Cleanup now checks fresh attributes
+on a cached reaction/hand target after Escape and retries only while that
+confirmed picker control remains present, with a three-attempt bound. Tests
+cover an ignored first Escape, successful dismissal, and the retry limit; the
+ignored-dismissal fixtures failed before the change. No full-tree scan or focus
+change was added to cleanup.
+
+The final background Node check paused the persistent helper, accepted exactly
+one Love reaction, resumed observation, and confirmed microphone unmuted and
+camera on immediately afterward. Fifty consecutive status requests, including
+five forced rediscoveries, passed after cleanup; median request time was 21 ms
+and maximum 516 ms. Native regressions, all 34 Node tests, TypeScript checking,
+packaging, and validation passed. Physical Stream Deck presses and extended
+reaction soaks remain unverified.
+
+Installed `0.2.0.8` was verified against the manifest and both rebuilt binary
+hashes after completing Stream Deck's Install prompt. Stream Deck started a new
+plugin process, PID 89177.

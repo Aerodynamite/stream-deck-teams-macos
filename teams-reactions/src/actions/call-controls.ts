@@ -13,7 +13,7 @@ import {
 	type TeamsCommand,
 	type TeamsState,
 } from "../helper-runner";
-import { commandCoordinator } from "../teams-services";
+import { commandCoordinator, operationLock, persistentControls } from "../teams-services";
 
 type StateField = "microphone" | "camera" | "hand";
 type KnownState = "muted" | "unmuted" | "on" | "off" | "raised" | "lowered";
@@ -41,6 +41,16 @@ class StateSynchronizer {
 	private refreshPromise: Promise<void> | undefined;
 	latest: TeamsState | undefined;
 
+	constructor() {
+		persistentControls.subscribe(state => {
+			if (!operationLock.busy) void this.apply(state);
+		});
+	}
+
+	get hasVisibleControls(): boolean {
+		return [...this.visible.values()].some(actions => actions.size > 0);
+	}
+
 	register(context: string, field: StateField, actionInstance: KeyAction): void {
 		let actions = this.visible.get(field);
 		if (!actions) {
@@ -48,11 +58,22 @@ class StateSynchronizer {
 			this.visible.set(field, actions);
 		}
 		actions.set(context, actionInstance);
+		persistentControls.retain(context);
 		void actionInstance.setImage(UNAVAILABLE_IMAGE);
 	}
 
 	unregister(context: string, field: StateField): void {
 		this.visible.get(field)?.delete(context);
+		persistentControls.release(context);
+		if (!this.hasVisibleControls) this.latest = undefined;
+	}
+
+	disconnectDevice(deviceID: string): void {
+		for (const [field, actions] of this.visible) {
+			for (const [context, actionInstance] of actions) {
+				if (actionInstance.device.id === deviceID) this.unregister(context, field);
+			}
+		}
 	}
 
 	async refresh(): Promise<void> {

@@ -1,4 +1,5 @@
 import streamDeck from "@elgato/streamdeck";
+import { watchPluginConnection } from "./helper-runner";
 
 import {
 	ApplauseAction,
@@ -12,8 +13,9 @@ import {
 	HandAction,
 	LeaveAction,
 	MuteAction,
+	stateSynchronizer,
 } from "./actions/call-controls";
-import { reactionBurstCoordinator } from "./teams-services";
+import { persistentControls, reactionBurstCoordinator } from "./teams-services";
 
 streamDeck.logger.setLevel("info");
 
@@ -27,7 +29,25 @@ streamDeck.actions.registerAction(new CameraAction());
 streamDeck.actions.registerAction(new HandAction());
 streamDeck.actions.registerAction(new LeaveAction());
 
-streamDeck.devices.onDeviceDidDisconnect(() => reactionBurstCoordinator.stopAll());
+streamDeck.devices.onDeviceDidDisconnect(ev => {
+	reactionBurstCoordinator.stopAll();
+	stateSynchronizer.disconnectDevice(ev.device.id);
+	if (!stateSynchronizer.hasVisibleControls) persistentControls.stop();
+});
 streamDeck.system.onApplicationDidTerminate(() => reactionBurstCoordinator.stopAll());
+streamDeck.system.onSystemDidWakeUp(() => {
+	persistentControls.invalidate();
+	if (stateSynchronizer.hasVisibleControls) void stateSynchronizer.refresh().catch(() => streamDeck.logger.warn("Teams state refresh after wake failed."));
+});
+process.once("beforeExit", () => { reactionBurstCoordinator.stopAll(); persistentControls.stop(); });
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+	process.once(signal, () => { reactionBurstCoordinator.stopAll(); persistentControls.stop(); process.exit(0); });
+}
 
-streamDeck.connect();
+streamDeck.connect().then(() => {
+	watchPluginConnection(() => streamDeck.settings.getGlobalSettings(), () => {
+		reactionBurstCoordinator.stopAll();
+		persistentControls.stop();
+		process.exit(0);
+	});
+});

@@ -1,6 +1,15 @@
 #define TEAMS_REACTION_TESTING 1
 #import "../TeamsReactionPOC.m"
 
+// Distinct provider elements may share a hash, including a toolbar ancestor.
+@interface CollidingElement : NSObject
+@property(nonatomic, strong) NSArray *children;
+@property(nonatomic, strong) AXNode *control;
+@end
+@implementation CollidingElement
+- (NSUInteger)hash { return 7; }
+@end
+
 static AXNode *Button(NSString *title, NSString *identifier, NSInteger depth) {
     AXNode *node = [AXNode new];
     node.identifier = identifier;
@@ -27,6 +36,42 @@ static void Expect(BOOL condition, NSString *message, int *failures) {
 int main(void) {
     @autoreleasepool {
         int failures = 0;
+
+        __block NSInteger dismissals = 0;
+        DismissPickerUntilGone(^{ dismissals += 1; }, ^BOOL { return dismissals < 2; });
+        Expect(dismissals == 2, @"picker cleanup must retry an ignored Escape and stop once dismissed", &failures);
+        dismissals = 0;
+        DismissPickerUntilGone(^{ dismissals += 1; }, ^BOOL { return YES; });
+        Expect(dismissals == 3, @"picker cleanup retries must remain bounded", &failures);
+        dismissals = 0;
+        DismissPickerUntilGone(^{ dismissals += 1; }, ^BOOL { return NO; });
+        Expect(dismissals == 1, @"confirmed picker dismissal must not send another Escape", &failures);
+
+        CollidingElement *root = [CollidingElement new];
+        CollidingElement *content = [CollidingElement new];
+        CollidingElement *toolbar = [CollidingElement new];
+        CollidingElement *micElement = [CollidingElement new];
+        CollidingElement *cameraElement = [CollidingElement new];
+        CollidingElement *reactElement = [CollidingElement new];
+        root.children = @[content, toolbar];
+        toolbar.children = @[micElement, cameraElement, reactElement, root];
+        micElement.control = Button(@"Unmute mic", @"microphone-button", 3);
+        cameraElement.control = Button(@"Turn camera off", @"camera-button", 3);
+        reactElement.control = Button(@"React", @"reaction-menu-button", 3);
+        NSMutableArray *discovered = [NSMutableArray array];
+        __block NSInteger visits = 0;
+        WalkElements(root, ^NSArray *(id element, NSInteger depth) {
+            (void)depth;
+            visits += 1;
+            CollidingElement *item = element;
+            if (item.control) [discovered addObject:item.control];
+            return item.children ?: @[];
+        });
+        Expect(visits == 6, @"traversal must visit distinct colliding elements once and stop real cycles", &failures);
+        NSDictionary *collisionState = StateSnapshot(@{@"elements": discovered});
+        Expect([collisionState[@"microphone"] isEqualToString:@"muted"] && [collisionState[@"camera"] isEqualToString:@"on"], @"hash collisions must not hide meeting controls behind a toolbar branch", &failures);
+        Expect(BestNode(discovered, ^NSInteger(AXNode *node) { return LauncherScore(node); }) == reactElement.control, @"React must remain discoverable after colliding content elements", &failures);
+        toolbar.children = @[];
 
         NSMutableArray<AXNode *> *busyWindow = [NSMutableArray array];
         for (NSInteger index = 0; index < 1000; index += 1) {
@@ -75,6 +120,30 @@ int main(void) {
         });
         Expect([StateSnapshot(ambiguousRefresh)[@"microphone"] isEqualToString:@"unknown"], @"verification must retain every ambiguous candidate", &failures);
 
+        Expect(ValidPersistentRequest(@{@"id": @1, @"command": @"mute", @"generation": @0, @"forceFresh": @YES}), @"persistent explicit mute request must validate", &failures);
+        for (NSString *blocked in @[@"leave", @"hand-raise", @"burst", @"react", @"inspect", @"toggle", @"MUTE"]) {
+            Expect(!ValidPersistentRequest(@{@"id": @1, @"command": blocked}), @"persistent protocol must reject commands outside its allow-list", &failures);
+        }
+        for (id badID in @[@YES, @0, @(-1), @1.5, @"1", NSNull.null]) {
+            Expect(!ValidPersistentRequest(@{@"id": badID, @"command": @"status"}), @"persistent correlation IDs must be positive safe integers", &failures);
+        }
+        Expect(!ValidPersistentRequest(@{@"id": @1, @"command": @"mute", @"forceFresh": @"true"}), @"cache invalidation must require a boolean", &failures);
+        Expect(!ValidPersistentGeneration(@{@"unexpected": @1}) && !ValidPersistentGeneration(@YES), @"generation tokens must reject non-integers and booleans", &failures);
+        NSDictionary *unavailableState = @{@"microphone": @"unavailable", @"camera": @"unavailable"};
+        Expect(PersistentNeedsDiscovery(YES, unavailableState, 0), @"a foreground request must rediscover an empty cache", &failures);
+        Expect(!PersistentNeedsDiscovery(NO, unavailableState, 0), @"idle fallback must not repeatedly scan an empty meeting tree", &failures);
+        Expect(!PersistentNeedsDiscovery(YES, @{@"microphone": @"muted", @"camera": @"on"}, 2), @"available warm controls must avoid full discovery", &failures);
+        AXNode *cachedMic = Button(@"Unmute mic", @"microphone-button", 10);
+        AXNode *freshMic = Button(@"Mute mic", @"microphone-button", 10);
+        Expect(RefreshedControlsMatch(@[cachedMic], @[freshMic]), @"cached controls must accept a fresh state change", &failures);
+        freshMic.identifier = @"replacement-button";
+        Expect(!RefreshedControlsMatch(@[cachedMic], @[freshMic]), @"changed control identities must trigger rediscovery", &failures);
+        freshMic.identifier = cachedMic.identifier; freshMic.title = @"Unrelated";
+        Expect(!RefreshedControlsMatch(@[cachedMic], @[freshMic]), @"changed control meaning must trigger rediscovery", &failures);
+        freshMic.title = @"Mute mic"; freshMic.actions = @[];
+        Expect(!RefreshedControlsMatch(@[cachedMic], @[freshMic]), @"disappeared actions must trigger rediscovery", &failures);
+        Expect(!RefreshedControlsMatch(@[cachedMic], @[]), @"missing cached controls must trigger rediscovery", &failures);
+
         Expect(BurstDurationLimit == 5.0, @"reaction hold guard must allow five seconds", &failures);
         Expect(BurstMaximumAttempts >= (NSInteger)ceil(BurstDurationLimit * BurstMaximumRate), @"attempt cap must allow the configured duration at the maximum supported rate", &failures);
         NSTimeInterval interval = 1.0 / 7.0;
@@ -99,6 +168,17 @@ int main(void) {
                 (long)LauncherScore(react));
             failures += 1;
         }
+
+        AXNode *recentItem = Button(@"Notes about reactions", @"_recentItemRequested:", 7);
+        recentItem.role = (__bridge NSString *)kAXMenuItemRole;
+        AXNode *anotherRecentItem = Button(@"Reaction planning", @"_recentItemRequested:", 7);
+        anotherRecentItem.role = (__bridge NSString *)kAXMenuItemRole;
+        Expect(LauncherScore(recentItem) == NSIntegerMin && LauncherScore(anotherRecentItem) == NSIntegerMin, @"recent-item menu entries must never be meeting React launchers", &failures);
+        NSDictionary *recentOnly = @{@"applicationCount": @1, @"elements": @[recentItem, anotherRecentItem]};
+        Expect(![StateSnapshot(recentOnly)[@"meetingActive"] boolValue], @"recent-item text must not invent an active meeting", &failures);
+        AXNode *exactMenuItem = Button(@"React", @"_recentItemRequested:", 7);
+        exactMenuItem.role = (__bridge NSString *)kAXMenuItemRole;
+        Expect(LauncherScore(exactMenuItem) == NSIntegerMin, @"a menu entry named React is still not a meeting toolbar control", &failures);
 
         AXNode *chatReact = Button(@"React to this message", @"", 7);
         selected = BestNode(@[chatReact, react], ^NSInteger(AXNode *node) {
