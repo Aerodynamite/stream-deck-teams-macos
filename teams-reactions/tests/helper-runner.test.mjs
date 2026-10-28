@@ -45,6 +45,14 @@ test("runs an allow-listed state command and parses JSON", async () => {
 	assert.equal(result.backgroundBlur, "unknown");
 });
 
+test("allows the hand picker round trip to finish and preserves explicit timeouts", async () => {
+	for (const [command, timeoutMs, expected] of [["hand-raise", undefined, 15_000], ["hand-lower", undefined, 15_000], ["status", undefined, 8_000], ["hand-raise", 1234, 1234]]) {
+		const capture = {};
+		await runTeamsCommand(command, { timeoutMs, execFileImpl: execResult({ ...STATE_RESULT, command }, capture) });
+		assert.equal(capture.options.timeout, expected);
+	}
+});
+
 test("runs an allow-listed reaction with explicit react arguments", async () => {
 	const capture = {};
 	const result = await runReactionHelper("love", {

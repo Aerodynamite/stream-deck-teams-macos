@@ -67,7 +67,9 @@ Do not enable a fallback in the packaged plugin until every focus case passes an
 
 ## Reaction tap and hold
 
-For each rate, hold Love for three seconds. Count the values separately. The helper's Accessibility count is not a delivery count.
+The default hold rate is 7 attempts per second. Confirm the picker remains open during repeats, presses are spaced about 143 ms apart, and slow picker setup does not produce a catch-up burst.
+
+For each rate, hold Love for five seconds. Count the values separately. The helper's Accessibility count is not a delivery count.
 
 | Attempts per second | Scheduled attempts | Accessibility accepted | Seen by second participant | Teams responsive | Result |
 |---:|---:|---:|---:|---|---|
@@ -75,6 +77,7 @@ For each rate, hold Love for three seconds. Count the values separately. The hel
 | 2 | Not run | Not run | Not run | Not run | Not run |
 | 3 | Not run | Not run | Not run | Not run | Not run |
 | 5 | Not run | Not run | Not run | Not run | Not run |
+| 7 (default) | Not run | Not run | Not run | Not run | Not run |
 | 10 | Not run | Not run | Not run | Not run | Not run |
 
 Also verify:
@@ -82,7 +85,7 @@ Also verify:
 - A tap sends exactly one reaction.
 - Repeating starts only after the hold threshold.
 - Release stops within one in-flight attempt.
-- Holding beyond three seconds stops at the duration guard.
+- Holding beyond five seconds stops at the duration guard.
 - Changing profiles while holding stops the session.
 - Disconnecting the Stream Deck while holding stops the session.
 - Another reaction or call-control key cannot overlap the active session.
@@ -103,4 +106,28 @@ Also verify:
 
 ## Release decision
 
-Do not call the plugin production-ready until all core controls pass in both directions, Leave is proven safe for attendee and organizer roles, and the default 3-per-second reaction wave is confirmed by a second participant.
+Do not call the plugin production-ready until all core controls pass in both directions, Leave is proven safe for attendee and organizer roles, and the default 7-per-second reaction wave is confirmed by a second participant.
+
+## 2026-10-28 toolbar compatibility check
+
+Client: Teams `26276.505.5234.9924`, English UI. These checks used the standalone helper built from the updated source, not the installed Stream Deck package.
+
+- Confirmed live microphone and camera state discovery while unmuted and camera on.
+- Confirmed a manually raised hand is reported as raised using the custom Accessibility description, despite the visible `Raise` label remaining unchanged.
+- Confirmed `hand-lower`, `hand-raise`, and a final `hand-lower`, including post-action state verification. Hand restored to lowered.
+- Confirmed one Love reaction accepted by Accessibility after removing the pre-opening scroll action. The Node burst runner also completed a tap with one accepted attempt and `key-up`, and a hold with 11 accepted attempts and `duration-limit` at 3308 ms. Delivery to another participant remains unverified.
+- Leave was not pressed. Organizer and attendee safety, mute and camera changes in both directions, compact/minimized/hidden toolbars, other languages, packaged installation, and reaction hold delivery remain unverified.
+
+## 2026-10-28 seven-per-second hold check
+
+The default repeat rate is now 7 per second. A live native Love hold opened React once, reused the cached reaction button for all 9 accepted presses, and stopped at the duration guard at 3001 ms. Temporary aggregate timing instrumentation measured 143.31 to 145.50 ms between reaction press starts. Instrumentation was removed after verification. Picker setup counts toward the existing three-second session budget.
+
+The Node runner also confirmed a tap produced exactly one accepted reaction with `key-up`, and releasing a hold produced 6 accepted reactions with `key-up` at 2485 ms.
+
+These are Accessibility acceptance and timing results. Second-participant delivery, focus/window variants, other reactions, and profile/device-disconnect behavior at the new rate remain unverified.
+
+## 2026-10-28 five-second hold check
+
+The session limit is now five seconds, including picker setup, at the unchanged default of 7 presses per second. The native attempt cap is 50 to support the maximum permitted rate of 10 per second; the Node watchdog allows 6500 ms for the session and cleanup.
+
+A live native Love hold accepted 21 of 21 presses and stopped with `duration-limit` at 5000 ms. A subsequent run through the Node runner accepted 23 of 23 and stopped at 5002 ms without triggering its watchdog. The first live attempt failed with a Teams reaction-control error; the two later attempts passed without code changes. Delivery to another participant and window/focus variants remain unverified.

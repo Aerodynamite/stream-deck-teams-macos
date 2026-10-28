@@ -57,7 +57,8 @@ const REACTION_SET: ReadonlySet<string> = new Set(REACTIONS);
 const COMMAND_SET: ReadonlySet<string> = new Set(TEAMS_COMMANDS);
 const DEFAULT_HELPER_PATH = fileURLToPath(new URL("./teams-reaction", import.meta.url));
 const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_BURST_TIMEOUT_MS = 4_500;
+const HAND_COMMAND_TIMEOUT_MS = 15_000;
+const DEFAULT_BURST_TIMEOUT_MS = 6_500;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 
 type ExecFileCallback = (error: NodeJS.ErrnoException | null, stdout: string, stderr: string) => void;
@@ -233,7 +234,7 @@ export function runTeamsCommand(command: string, options: HelperRunnerOptions = 
 		const result = parseTeamsResult(stdout);
 		if (result.command !== command) throw new HelperExecutionError(null, false, "The Teams helper returned a result for a different command.");
 		return result;
-	}, options);
+	}, { ...options, timeoutMs: options.timeoutMs ?? (command.startsWith("hand-") ? HAND_COMMAND_TIMEOUT_MS : DEFAULT_TIMEOUT_MS) });
 }
 
 export function runReactionHelper(reaction: string, options: HelperRunnerOptions = {}): Promise<ReactionCommandResult> {

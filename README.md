@@ -15,7 +15,7 @@ The plugin does not use mouse coordinates, screen capture, image recognition, Te
 
 ## Current status
 
-Version `0.2.0.0` implements the new actions, plugin-controlled two-state keys, explicit desired-state commands, JSON state results, control-specific safety rules, optional process-targeted keyboard fallbacks, and native long-press reaction sessions.
+Version `0.2.0.3` implements the new actions, plugin-controlled two-state keys, explicit desired-state commands, JSON state results, control-specific safety rules, optional process-targeted keyboard fallbacks, and native long-press reaction sessions.
 
 Automated tests cover command allow-listing, JSON validation, process locking, burst cancellation and timeout handling, exact control selection, state derivation, and the original regression that distinguishes the meeting **React** button from **Raise your hand** and **React to this message**.
 
@@ -24,6 +24,14 @@ The implementation still needs live qualification in real Teams meetings before 
 - Exact microphone, camera, hand, and leave labels need confirmation against the installed Teams build.
 - Keyboard fallbacks are compiled but disabled by default until they pass focus and minimized-window testing.
 - Accessibility acceptance of repeated reactions does not prove that every reaction reached another participant.
+
+## Teams toolbar compatibility
+
+The helper reads Chromium's `AXCustomContent` descriptions as well as visible labels, and falls back to `AXDOMIdentifier` when `AXIdentifier` is absent. Teams can keep a short label such as `Raise` unchanged while its custom description switches between `Raise your hand` and `Lower your hand`.
+
+The React control can expose hand state directly in its custom description. When a hand change needs the control inside React, the helper opens the picker and dismisses it afterward with Escape sent only to Teams. Reactions open React directly without scrolling first, since scrolling immediately before pressing can invalidate the new toolbar's action path. Hand changes have a 15-second helper timeout to allow the picker and state verification round trip. Meeting-control shortcut fallbacks remain disabled by default.
+
+Live helper checks on Teams `26276.505.5234.9924` confirmed hand state and both hand commands. One Love reaction was accepted by Accessibility. Second-participant delivery and the remaining live matrix are still unverified.
 
 ## Requirements
 
@@ -77,8 +85,10 @@ If an older development copy with the same plugin identifier is installed or lin
 
 Stream Deck keeps the plugin process from the last install running. Copying a new `bin/plugin.js` into the installed plugin folder does not reload it, and `streamdeck restart` is ignored for a plugin that was installed from a package rather than linked in developer mode. To load a new build, either:
 
-- Install the repacked `.streamDeckPlugin` file again, or
+- Install a repacked `.streamDeckPlugin` with a higher manifest `Version`, or
 - Quit Stream Deck from its menu bar icon and reopen it.
+
+Bump the manifest version before packaging an update. Stream Deck can reject an installer with the same version as already installed, leaving the old files in place. Restarting alone only helps if the installed files have actually been replaced.
 
 After a reload, `~/Library/Logs/ElgatoStreamDeck/StreamDeck.log` shows a new `Plugin connected` line for `com.laurens-bolle.teams-reactions`.
 
@@ -104,10 +114,10 @@ Unknown and unavailable control states are rendered with dedicated question-mark
 ## Reaction key behavior
 
 - A normal tap sends exactly one reaction.
-- Holding longer than about 300 ms starts repeating at 3 attempts per second.
+- Holding longer than about 300 ms starts repeating at 7 attempts per second, reusing the open picker and cached reaction control.
 - Releasing the key closes the helper's standard input and stops scheduling new attempts.
-- A session stops after 3 seconds even if key-up is lost.
-- Native hard limits cap the rate at 10 attempts per second and the session at 30 attempts.
+- A session stops after 5 seconds even if key-up is lost. This budget includes picker setup, so slow setup reduces the total number of reactions.
+- Native hard limits cap the rate at 10 attempts per second and the session at 50 attempts.
 - Only one Teams operation can run at a time.
 - Reactions inside a Stream Deck Multi Action always send once because there is no physical hold duration.
 
@@ -157,7 +167,7 @@ Query state or invoke explicit commands:
 ./.build/teams-reaction hand-lower
 ./.build/teams-reaction leave
 ./.build/teams-reaction react love
-./.build/teams-reaction burst love 3
+./.build/teams-reaction burst love 7
 ```
 
 Normal command results are one JSON object on standard output. Diagnostics go to standard error. `inspect-controls` omits meeting window titles, but its matched labels may still reflect the installed Teams language. Review diagnostic output before sharing it.
@@ -219,6 +229,6 @@ Stream Deck action
     -> JSON result back to Stream Deck
 ```
 
-Reaction holds use one child process for the complete key-down to key-up session. The helper first tries repeated presses on the cached reaction element, then reopens and reacquires the reaction picker when that element becomes invalid. The original full Teams scan remains in the first reaction lookup so the proven popover path is not narrowed.
+Reaction holds use one child process for the complete key-down to key-up session. The helper opens the picker once and repeatedly presses the cached reaction element at roughly 143 ms intervals. Slow setup or recovery does not cause catch-up presses. It reopens and reacquires the picker only if the cached element becomes invalid, and dismisses the picker when the session ends. The original full Teams scan remains in the first reaction lookup so the proven popover path is not narrowed.
 
 The native helper restricts process discovery to `com.microsoft.teams2` and its child bundle identifiers. Leave selection explicitly rejects end-meeting, end-for-all, decline, and dismiss controls. Equally plausible destructive controls fail as ambiguous instead of choosing one.

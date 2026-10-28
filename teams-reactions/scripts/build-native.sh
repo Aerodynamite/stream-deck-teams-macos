@@ -20,6 +20,7 @@ xcrun clang \
   -framework Foundation \
   -framework ApplicationServices \
   -framework AppKit \
+  -framework Accessibility \
   "$source_dir/TeamsReactionPOC.m" \
   -o "$binary"
 

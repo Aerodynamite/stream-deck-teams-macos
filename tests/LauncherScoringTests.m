@@ -7,6 +7,7 @@ static AXNode *Button(NSString *title, NSString *identifier, NSInteger depth) {
     node.title = title;
     node.nodeDescription = @"";
     node.helpText = @"";
+    node.customDescription = @"";
     node.value = @"";
     node.role = (__bridge NSString *)kAXButtonRole;
     node.actions = @[(__bridge NSString *)kAXPressAction];
@@ -26,6 +27,16 @@ static void Expect(BOOL condition, NSString *message, int *failures) {
 int main(void) {
     @autoreleasepool {
         int failures = 0;
+        Expect(BurstDurationLimit == 5.0, @"reaction hold guard must allow five seconds", &failures);
+        Expect(BurstMaximumAttempts >= (NSInteger)ceil(BurstDurationLimit * BurstMaximumRate), @"attempt cap must allow the configured duration at the maximum supported rate", &failures);
+        NSTimeInterval interval = 1.0 / 7.0;
+        Expect(fabs(NextBurstAttemptTime(1.8, 7) - (1.8 + interval)) < 0.000001, @"slow picker setup must not create overdue reaction presses", &failures);
+        Expect(fabs(NextBurstAttemptTime(0.01, 7) - BurstHoldThreshold) < 0.000001, @"fast setup must preserve the tap hold threshold", &failures);
+        NSTimeInterval pressTime = BurstHoldThreshold;
+        for (NSInteger repeat = 0; repeat < 7; repeat += 1) pressTime = NextBurstAttemptTime(pressTime, 7);
+        Expect(fabs(pressTime - (BurstHoldThreshold + 1.0)) < 0.000001, @"seven repeat intervals must span one second", &failures);
+        Expect(NextBurstAttemptTime(2.2, 7) > 2.34, @"a slow press or target recovery must not trigger catch-up presses", &failures);
+
         AXNode *raiseHand = Button(@"Raise your hand", @"", 10);
         AXNode *react = Button(@"React", @"", 10);
         AXNode *selected = BestNode(@[raiseHand, react], ^NSInteger(AXNode *node) {
@@ -80,10 +91,66 @@ int main(void) {
         AXNode *lowerHand = Button(@"Lower your hand", @"hand-button", 10);
         Expect([HandStateForNode(lowerHand) isEqualToString:@"raised"], @"Lower hand must mean the hand is currently raised", &failures);
 
+        AXNode *pickerRaise = Button(@"Raise", @"", 8);
+        pickerRaise.customDescription = @"Raise your hand. Has context menu";
+        AXCustomContent *description = [AXCustomContent customContentWithLabel:@"description" value:pickerRaise.customDescription];
+        NSData *archive = [NSKeyedArchiver archivedDataWithRootObject:@[description] requiringSecureCoding:YES error:NULL];
+        Expect([CustomDescription(archive) isEqualToString:pickerRaise.customDescription], @"Chromium custom description archive must decode securely", &failures);
+        Expect([CustomDescription(@[description]) isEqualToString:pickerRaise.customDescription], @"native custom description array must decode", &failures);
+        Expect(CustomDescription([@"invalid archive" dataUsingEncoding:NSUTF8StringEncoding]).length == 0, @"invalid custom content must be ignored", &failures);
+        Expect(CustomDescription(@[@"unexpected"]).length == 0, @"unexpected custom content must be ignored", &failures);
+        AXNode *pickerLike = Button(@"Like", @"", 8);
+        AXNode *pickerLove = Button(@"Love", @"", 8);
+        AXNode *pickerLaugh = Button(@"Laugh", @"", 8);
+        NSArray *picker = @[pickerRaise, pickerLike, pickerLove, pickerLaugh];
+        MarkMeetingReactionPicker(picker);
+        Expect(HandScore(pickerRaise) > 0, @"new meeting picker Raise must be selectable", &failures);
+        Expect([HandStateForNode(pickerRaise) isEqualToString:@"lowered"], @"picker Raise means hand lowered", &failures);
+        Expect([StateSnapshot(@{@"applicationCount": @1, @"elements": picker})[@"meetingActive"] boolValue], @"open meeting picker must preserve meeting detection", &failures);
+        // The visible title stays Raise even when the hand is raised.
+        pickerRaise.customDescription = @"Lower your hand. Has context menu";
+        Expect([HandStateForNode(pickerRaise) isEqualToString:@"raised"], @"custom Lower description must override the unchanged Raise title", &failures);
+        AXNode *unknownRaise = Button(@"Raise", @"raisehands-button", 8);
+        unknownRaise.meetingReactionPicker = YES;
+        Expect([HandStateForNode(unknownRaise) isEqualToString:@"unknown"], @"short Raise alone must not invent a hand state", &failures);
+        AXNode *unscopedRaise = Button(@"Raise", @"", 8);
+        MarkMeetingReactionPicker(@[unscopedRaise]);
+        Expect(HandScore(unscopedRaise) == NSIntegerMin, @"short Raise outside a meeting picker must be rejected", &failures);
+        AXNode *chatRaise = Button(@"Raise", @"chat-raise", 8);
+        MarkMeetingReactionPicker(@[chatRaise, pickerLike, pickerLove, pickerLaugh]);
+        Expect(HandScore(chatRaise) == NSIntegerMin, @"chat Raise must be rejected", &failures);
+
+        AXNode *stateLauncher = Button(@"React", @"reaction-menu-button", 8);
+        stateLauncher.customDescription = @"React or raise your hand. Your hand is not raised. Has context menu";
+        NSDictionary *launcherScan = @{@"applicationCount": @1, @"elements": @[stateLauncher]};
+        Expect([StateSnapshot(launcherScan)[@"hand"] isEqualToString:@"lowered"], @"closed picker must expose lowered state from React description", &failures);
+        stateLauncher.customDescription = @"React or raise your hand. Your hand is raised. Has context menu";
+        Expect([StateSnapshot(launcherScan)[@"hand"] isEqualToString:@"raised"], @"closed picker must expose raised state from React description", &failures);
+        stateLauncher.customDescription = @"React or raise your hand. Has context menu";
+        Expect([HandStateFromLauncher(stateLauncher) isEqualToString:@"unavailable"], @"generic React description must not invent hand state", &failures);
+
+        MeetingToolbarScan = @{@"applicationCount": @1, @"elements": @[mute, cameraOn]};
+        NSDictionary *pickerState = StateSnapshot(WithMeetingToolbarState(@{@"applicationCount": @1, @"elements": picker}));
+        Expect([pickerState[@"hand"] isEqualToString:@"raised"] && [pickerState[@"microphone"] isEqualToString:@"unmuted"] && [pickerState[@"camera"] isEqualToString:@"off"], @"modal picker snapshot must preserve toolbar states and use the current hand state", &failures);
+        NSDictionary *closedScan = @{@"applicationCount": @1, @"elements": @[unmute]};
+        Expect(WithMeetingToolbarState(closedScan) == closedScan, @"closed picker must use fresh toolbar state", &failures);
+        MeetingToolbarScan = nil;
+
         AXNode *leave = Button(@"Leave", @"leave-button", 10);
         AXNode *endForAll = Button(@"Leave | End meeting for all", @"end-meeting-button", 9);
         Expect(LeaveScore(leave) > 0, @"exact Leave control must be eligible", &failures);
         Expect(LeaveScore(endForAll) == NSIntegerMin, @"End meeting for all must never be eligible", &failures);
+
+        AXNode *customEndForAll = Button(@"Leave", @"leave-button", 10);
+        customEndForAll.customDescription = @"End meeting for all";
+        Expect(LeaveScore(customEndForAll) == NSIntegerMin, @"destructive custom description must veto a Leave title", &failures);
+        AXNode *newMic = Button(@"Mic", @"microphone-button", 10);
+        newMic.customDescription = @"Unmute mic. Has context menu";
+        newMic.role = (__bridge NSString *)kAXCheckBoxRole;
+        Expect(MicrophoneScore(newMic) > 0 && [MicrophoneStateForNode(newMic) isEqualToString:@"muted"], @"generic Mic title must use custom action state", &failures);
+        AXNode *newCamera = Button(@"Camera", @"video-button", 10);
+        newCamera.customDescription = @"Turn camera off. Has context menu";
+        Expect(CameraScore(newCamera) > 0 && [CameraStateForNode(newCamera) isEqualToString:@"on"], @"generic Camera title must use custom action state", &failures);
 
         BOOL ambiguous = NO;
         AXNode *secondLeave = Button(@"Leave", @"leave-button", 10);

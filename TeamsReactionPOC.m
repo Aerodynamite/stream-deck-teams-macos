@@ -1,4 +1,5 @@
 #import <AppKit/AppKit.h>
+#import <Accessibility/Accessibility.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <Foundation/Foundation.h>
 #import <errno.h>
@@ -10,10 +11,10 @@ static const NSInteger MaxVisitedElements = 30000;
 static const NSTimeInterval MenuTimeout = 4.0;
 static const NSTimeInterval VerificationTimeout = 2.0;
 static const NSTimeInterval BurstHoldThreshold = 0.30;
-static const NSTimeInterval BurstDurationLimit = 3.0;
-static const NSInteger BurstDefaultRate = 3;
+static const NSTimeInterval BurstDurationLimit = 5.0;
+static const NSInteger BurstDefaultRate = 7;
 static const NSInteger BurstMaximumRate = 10;
-static const NSInteger BurstMaximumAttempts = 30;
+static const NSInteger BurstMaximumAttempts = 50;
 static CFStringRef const AXScrollToVisibleAction = CFSTR("AXScrollToVisible");
 
 @interface AXNode : NSObject
@@ -26,11 +27,13 @@ static CFStringRef const AXScrollToVisibleAction = CFSTR("AXScrollToVisible");
 @property(nonatomic, copy) NSString *title;
 @property(nonatomic, copy) NSString *nodeDescription;
 @property(nonatomic, copy) NSString *helpText;
+@property(nonatomic, copy) NSString *customDescription;
 @property(nonatomic, copy) NSString *value;
 @property(nonatomic, copy) NSArray<NSString *> *actions;
 @property(nonatomic) NSInteger depth;
 @property(nonatomic) BOOL focusedWindow;
 @property(nonatomic) BOOL selected;
+@property(nonatomic) BOOL meetingReactionPicker;
 - (AXUIElementRef)element;
 - (NSString *)searchableText;
 - (NSString *)displayText;
@@ -43,14 +46,14 @@ static CFStringRef const AXScrollToVisibleAction = CFSTR("AXScrollToVisible");
 }
 - (NSString *)searchableText {
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    for (NSString *part in @[self.identifier, self.title, self.nodeDescription, self.helpText, self.value]) {
+    for (NSString *part in @[self.identifier, self.title, self.nodeDescription, self.helpText, self.customDescription ?: @"", self.value]) {
         if (part.length > 0) [parts addObject:part];
     }
     return [[parts componentsJoinedByString:@" | "] lowercaseString];
 }
 - (NSString *)displayText {
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    for (NSString *part in @[self.title, self.nodeDescription, self.helpText, self.value, self.identifier]) {
+    for (NSString *part in @[self.title, self.nodeDescription, self.helpText, self.customDescription ?: @"", self.value, self.identifier]) {
         if (part.length > 0) [parts addObject:part];
     }
     return parts.count == 0 ? @"<no accessible label>" : [parts componentsJoinedByString:@" | "];
@@ -130,7 +133,7 @@ static void PrintUsage(const char *executablePath) {
     printf("  %s react like|love|applause|laugh|surprise\n", executable.UTF8String);
     printf("  %s burst like|love|applause|laugh|surprise [rate]\n", executable.UTF8String);
     printf("  %s inspect\n\n", executable.UTF8String);
-    printf("Burst rate defaults to 3 and is capped at 10 attempts per second.\n");
+    printf("Burst rate defaults to %ld and is capped at %ld attempts per second.\n", (long)BurstDefaultRate, (long)BurstMaximumRate);
     printf("inspect and inspect-controls do not press anything.\n");
 }
 
@@ -138,6 +141,24 @@ static id CopyAttribute(AXUIElementRef element, CFStringRef attribute) {
     CFTypeRef value = NULL;
     if (AXUIElementCopyAttributeValue(element, attribute, &value) != kAXErrorSuccess || value == NULL) return nil;
     return CFBridgingRelease(value);
+}
+
+static NSString *CustomDescription(id content) {
+    if ([content isKindOfClass:NSData.class]) {
+        @try {
+            NSSet *classes = [NSSet setWithArray:@[NSArray.class, AXCustomContent.class, NSAttributedString.class, NSDictionary.class, NSString.class, NSNumber.class]];
+            content = [NSKeyedUnarchiver unarchivedObjectOfClasses:classes fromData:content error:NULL];
+        } @catch (NSException *exception) {
+            return @"";
+        }
+    }
+    if (![content isKindOfClass:NSArray.class]) return @"";
+    for (id item in content) {
+        if (![item isKindOfClass:AXCustomContent.class]) continue;
+        AXCustomContent *entry = item;
+        if ([entry.label isEqualToString:@"description"] && entry.value.length > 0) return entry.value;
+    }
+    return @"";
 }
 
 static NSString *StringAttribute(AXUIElementRef element, CFStringRef attribute) {
@@ -194,6 +215,8 @@ static void EncourageAccessibilityTree(AXUIElementRef application) {
     AXUIElementSetAttributeValue(application, CFSTR("AXEnhancedUserInterface"), kCFBooleanTrue);
 }
 
+static void MarkMeetingReactionPicker(NSArray<AXNode *> *nodes);
+
 static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSString *processName, NSString *windowTitle, AXUIElementRef focusedWindow) {
     NSMutableArray<AXNode *> *result = [NSMutableArray array];
     NSMutableArray<NSDictionary *> *stack = [NSMutableArray arrayWithObject:@{@"element": (__bridge id)root, @"depth": @0}];
@@ -214,9 +237,11 @@ static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSStri
         node.windowTitle = windowTitle;
         node.role = StringAttribute(element, kAXRoleAttribute);
         node.identifier = StringAttribute(element, kAXIdentifierAttribute);
+        if (node.identifier.length == 0) node.identifier = StringAttribute(element, CFSTR("AXDOMIdentifier"));
         node.title = StringAttribute(element, kAXTitleAttribute);
         node.nodeDescription = StringAttribute(element, kAXDescriptionAttribute);
         node.helpText = StringAttribute(element, kAXHelpAttribute);
+        node.customDescription = CustomDescription(CopyAttribute(element, CFSTR("AXCustomContent")));
         node.value = StringAttribute(element, kAXValueAttribute);
         node.actions = Actions(element);
         node.depth = depth;
@@ -228,6 +253,7 @@ static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSStri
             [stack addObject:@{@"element": childObject, @"depth": @(depth + 1)}];
         }
     }
+    MarkMeetingReactionPicker(result);
     return result;
 }
 
@@ -284,7 +310,7 @@ static BOOL ActionFieldMatches(NSString *field, NSArray<NSString *> *labels) {
     for (NSString *labelValue in labels) {
         NSString *label = Normalized(labelValue);
         if ([normalized isEqualToString:label]) return YES;
-        for (NSString *separator in @[@" (", @", ", @" | "]) {
+        for (NSString *separator in @[@" (", @", ", @" | ", @". "]) {
             if ([normalized hasPrefix:[label stringByAppendingString:separator]]) return YES;
         }
     }
@@ -292,7 +318,7 @@ static BOOL ActionFieldMatches(NSString *field, NSArray<NSString *> *labels) {
 }
 
 static BOOL NodeMatchesAction(AXNode *node, NSArray<NSString *> *labels) {
-    for (NSString *field in @[node.title, node.nodeDescription, node.helpText, node.value]) {
+    for (NSString *field in @[node.title, node.nodeDescription, node.helpText, node.customDescription ?: @"", node.value]) {
         if (ActionFieldMatches(field, labels)) return YES;
     }
     return NO;
@@ -316,7 +342,7 @@ static NSInteger LauncherScore(AXNode *node) {
     if (!ContainsAny(node.searchableText, LauncherLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     if (score == NSIntegerMin) return score;
-    for (NSString *field in @[node.title, node.nodeDescription, node.helpText, node.value]) {
+    for (NSString *field in @[node.title, node.nodeDescription, node.helpText, node.customDescription ?: @"", node.value]) {
         if (EqualsAny(field, LauncherLabels())) { score += 80; break; }
     }
     if ([node.identifier.lowercaseString containsString:@"react"]) score += 30;
@@ -347,6 +373,21 @@ static NSInteger CameraScore(AXNode *node) {
     if ([node.identifier.lowercaseString containsString:@"camera"] || [node.identifier.lowercaseString containsString:@"video"]) score += 30;
     if ([node.searchableText containsString:@"settings"] || [node.searchableText containsString:@"preview"]) score -= 120;
     return score;
+}
+
+// Recognize a meeting picker without relying on window titles or participant text.
+static void MarkMeetingReactionPicker(NSArray<AXNode *> *nodes) {
+    NSMutableSet<NSString *> *reactions = [NSMutableSet set];
+    BOOL hasHand = NO;
+    for (AXNode *node in nodes) {
+        if (!node.canPress || HasUnsafeContext(node)) continue;
+        if (NodeMatchesAction(node, RaiseHandLabels()) || NodeMatchesAction(node, LowerHandLabels())) hasHand = YES;
+        for (NSString *key in ReactionDefinitions()) {
+            if (NodeMatchesAction(node, ReactionDefinitions()[key][@"labels"])) [reactions addObject:key];
+        }
+    }
+    if (!hasHand || reactions.count < 3) return;
+    for (AXNode *node in nodes) node.meetingReactionPicker = YES;
 }
 
 static NSInteger HandScore(AXNode *node) {
@@ -482,6 +523,14 @@ static NSString *HandStateForNode(AXNode *node) {
     return @"unknown";
 }
 
+static NSString *HandStateFromLauncher(AXNode *launcher) {
+    if (!launcher) return @"unavailable";
+    NSString *description = Normalized(launcher.customDescription);
+    if ([description containsString:@"your hand is not raised."]) return @"lowered";
+    if ([description containsString:@"your hand is raised."]) return @"raised";
+    return @"unavailable";
+}
+
 static NSDictionary *StateSnapshot(NSDictionary *scan) {
     NSArray<AXNode *> *elements = scan[@"elements"];
     BOOL micAmbiguous = NO, cameraAmbiguous = NO, handAmbiguous = NO;
@@ -497,6 +546,8 @@ static NSDictionary *StateSnapshot(NSDictionary *scan) {
     NSString *microphoneState = !meetingActive ? @"unavailable" : (micAmbiguous ? @"unknown" : (microphone ? MicrophoneStateForNode(microphone) : @"unavailable"));
     NSString *cameraState = !meetingActive ? @"unavailable" : (cameraAmbiguous ? @"unknown" : (camera ? CameraStateForNode(camera) : @"unavailable"));
     NSString *handState = !meetingActive ? @"unavailable" : (handAmbiguous ? @"unknown" : (hand ? HandStateForNode(hand) : @"unavailable"));
+
+    if ([handState isEqualToString:@"unavailable"] && !launcherAmbiguous) handState = HandStateFromLauncher(launcher);
 
     BOOL blurAmbiguous = NO, noneAmbiguous = NO;
     AXNode *blur = BestUniqueNode(elements, ^NSInteger(AXNode *node) { return BlurOptionScore(node); }, &blurAmbiguous);
@@ -534,7 +585,7 @@ static BOOL ShortcutFallbackEnabled(NSString *family) {
     return [parts containsObject:@"all"] || [parts containsObject:family.lowercaseString];
 }
 
-static BOOL PostTeamsShortcut(pid_t pid, CGKeyCode keyCode) {
+static BOOL PostTeamsKey(pid_t pid, CGKeyCode keyCode, CGEventFlags flags) {
     CGEventSourceRef source = CGEventSourceCreate(kCGEventSourceStatePrivate);
     if (!source) return NO;
     CGEventRef down = CGEventCreateKeyboardEvent(source, keyCode, true);
@@ -545,7 +596,6 @@ static BOOL PostTeamsShortcut(pid_t pid, CGKeyCode keyCode) {
         if (up) CFRelease(up);
         return NO;
     }
-    CGEventFlags flags = kCGEventFlagMaskCommand | kCGEventFlagMaskShift;
     CGEventSetFlags(down, flags);
     CGEventSetFlags(up, flags);
     CGEventPostToPid(pid, down);
@@ -555,10 +605,78 @@ static BOOL PostTeamsShortcut(pid_t pid, CGKeyCode keyCode) {
     return YES;
 }
 
+static BOOL PostTeamsShortcut(pid_t pid, CGKeyCode keyCode) {
+    return PostTeamsKey(pid, keyCode, kCGEventFlagMaskCommand | kCGEventFlagMaskShift);
+}
+
+static pid_t OpenMeetingPickerPID = 0;
+static NSDictionary *MeetingToolbarScan = nil;
+
+static void DismissMeetingPicker(void) {
+    if (OpenMeetingPickerPID <= 0) return;
+    // Escape dismisses only the confirmed Teams picker, never a meeting control.
+    PostTeamsKey(OpenMeetingPickerPID, 53, 0);
+    OpenMeetingPickerPID = 0;
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
+}
+
+static NSDictionary *WithMeetingToolbarState(NSDictionary *scan) {
+    if (!MeetingToolbarScan) return scan;
+    NSMutableArray *hands = [NSMutableArray array];
+    for (AXNode *node in scan[@"elements"]) {
+        if (node.meetingReactionPicker && HandScore(node) > 0) [hands addObject:node];
+    }
+    if (hands.count == 0) return scan;
+    NSMutableArray *elements = [MeetingToolbarScan[@"elements"] mutableCopy];
+    [elements addObjectsFromArray:hands];
+    return @{@"applicationCount": scan[@"applicationCount"], @"elements": elements};
+}
+
+static NSDictionary *ScanMeetingControlsInScan(NSDictionary *scan, BOOL includeHand) {
+    BOOL pickerVisible = NO;
+    for (AXNode *node in scan[@"elements"]) {
+        if (node.meetingReactionPicker) { OpenMeetingPickerPID = node.pid; pickerVisible = YES; break; }
+    }
+    if (pickerVisible && includeHand && MeetingToolbarScan) return WithMeetingToolbarState(scan);
+    if (OpenMeetingPickerPID > 0) {
+        DismissMeetingPicker();
+        scan = ScanTeams();
+    }
+    if (!includeHand) return scan;
+    BOOL ambiguous = NO;
+    AXNode *hand = BestUniqueNode(scan[@"elements"], ^NSInteger(AXNode *node) { return HandScore(node); }, &ambiguous);
+    if (hand || ambiguous) return scan;
+    AXNode *launcher = BestUniqueNode(scan[@"elements"], ^NSInteger(AXNode *node) { return LauncherScore(node); }, &ambiguous);
+    if (!launcher || ambiguous || PressNode(launcher) != kAXErrorSuccess) return scan;
+    MeetingToolbarScan = scan;
+    OpenMeetingPickerPID = launcher.pid;
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:VerificationTimeout];
+    NSDictionary *pickerScan;
+    do {
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.15]];
+        pickerScan = ScanTeams();
+        BOOL handAmbiguous = NO;
+        AXNode *pickerHand = BestUniqueNode(pickerScan[@"elements"], ^NSInteger(AXNode *node) { return HandScore(node); }, &handAmbiguous);
+        if (pickerHand || handAmbiguous) return WithMeetingToolbarState(pickerScan);
+    } while (deadline.timeIntervalSinceNow > 0);
+    return scan;
+}
+
+static NSDictionary *ScanMeetingControls(BOOL includeHand) {
+    return ScanMeetingControlsInScan(ScanTeams(), includeHand);
+}
+
 typedef NSString *(^NodeStateReader)(AXNode *node);
 
 static int PerformDesiredControl(NSString *command, NSString *desiredState, NSString *family, CGKeyCode shortcutKey, NodeScorer scorer, NodeStateReader stateReader) {
-    NSDictionary *initialScan = ScanTeams();
+    NSDictionary *initialScan = ScanMeetingControls(NO);
+    if ([family isEqualToString:@"hand"]) {
+        if ([StateSnapshot(initialScan)[@"hand"] isEqualToString:desiredState]) {
+            WriteJSON(ResultForScan(initialScan, command, NO));
+            return 0;
+        }
+        initialScan = ScanMeetingControlsInScan(initialScan, YES);
+    }
     if ([initialScan[@"applicationCount"] integerValue] == 0) {
         WriteJSON(ResultForScan(initialScan, command, NO));
         fprintf(stderr, "Microsoft Teams is not running.\n");
@@ -586,7 +704,7 @@ static int PerformDesiredControl(NSString *command, NSString *desiredState, NSSt
         fprintf(stderr, "The current %s state could not be determined safely.\n", family.UTF8String);
         return 10;
     }
-    ScrollNodeIntoView(control);
+    if (!control.meetingReactionPicker) ScrollNodeIntoView(control);
     AXError pressError = PressNode(control);
     BOOL usedShortcut = NO;
     if (pressError != kAXErrorSuccess && ShortcutFallbackEnabled(family)) usedShortcut = PostTeamsShortcut(control.pid, shortcutKey);
@@ -599,10 +717,12 @@ static int PerformDesiredControl(NSString *command, NSString *desiredState, NSSt
     NSDictionary *currentScan;
     do {
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
-        currentScan = ScanTeams();
+        currentScan = [family isEqualToString:@"hand"] ? WithMeetingToolbarState(ScanTeams()) : ScanMeetingControls(NO);
         BOOL currentAmbiguous = NO;
         AXNode *currentControl = BestUniqueNode(currentScan[@"elements"], scorer, &currentAmbiguous);
-        if (!currentAmbiguous && currentControl && [[stateReader(currentControl) lowercaseString] isEqualToString:desiredState]) {
+        BOOL confirmed = !currentAmbiguous && currentControl && [stateReader(currentControl) isEqualToString:desiredState];
+        if ([family isEqualToString:@"hand"] && !currentAmbiguous) confirmed = [StateSnapshot(currentScan)[@"hand"] isEqualToString:desiredState];
+        if (confirmed) {
             WriteJSON(ResultForScan(currentScan, command, YES));
             return 0;
         }
@@ -613,7 +733,7 @@ static int PerformDesiredControl(NSString *command, NSString *desiredState, NSSt
 }
 
 static int PerformLeave(void) {
-    NSDictionary *initialScan = ScanTeams();
+    NSDictionary *initialScan = ScanMeetingControls(NO);
     if ([initialScan[@"applicationCount"] integerValue] == 0) {
         WriteJSON(ResultForScan(initialScan, @"leave", NO));
         fprintf(stderr, "Microsoft Teams is not running.\n");
@@ -871,15 +991,15 @@ static AXNode *FindReactionTarget(NSDictionary *reaction, AXNode *launcher, NSSe
 }
 
 static int PrepareReactionSession(NSDictionary *reaction, ReactionSession **sessionOut) {
-    NSDictionary *initialScan = ScanTeams();
+    NSDictionary *initialScan = ScanMeetingControls(NO);
     if ([initialScan[@"applicationCount"] integerValue] == 0) return 2;
     BOOL ambiguous = NO;
     AXNode *launcher = BestUniqueNode(initialScan[@"elements"], ^NSInteger(AXNode *node) { return LauncherScore(node); }, &ambiguous);
     if (ambiguous || !launcher) return ambiguous ? 11 : 3;
     NSMutableSet<NSNumber *> *initialIdentities = [NSMutableSet set];
     for (AXNode *node in initialScan[@"elements"]) [initialIdentities addObject:@(CFHash(node.element))];
-    ScrollNodeIntoView(launcher);
     if (PressNode(launcher) != kAXErrorSuccess) return 4;
+    OpenMeetingPickerPID = launcher.pid;
     AXNode *target = FindReactionTarget(reaction, launcher, initialIdentities, MenuTimeout, YES);
     if (!target) return 5;
     ReactionSession *session = [ReactionSession new];
@@ -934,9 +1054,14 @@ static BOOL BurstStopRequested(void) {
 static BOOL WaitForBurstTime(NSDate *start, NSTimeInterval targetElapsed) {
     while (-start.timeIntervalSinceNow < targetElapsed) {
         if (BurstStopRequested()) return NO;
-        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        NSTimeInterval remaining = targetElapsed + start.timeIntervalSinceNow;
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:MIN(0.01, remaining)]];
     }
     return !BurstStopRequested();
+}
+
+static NSTimeInterval NextBurstAttemptTime(NSTimeInterval previousPressTime, NSInteger rate) {
+    return MAX(BurstHoldThreshold, previousPressTime + 1.0 / (NSTimeInterval)rate);
 }
 
 static int BurstReaction(NSDictionary *reaction, NSInteger requestedRate) {
@@ -954,24 +1079,31 @@ static int BurstReaction(NSDictionary *reaction, NSInteger requestedRate) {
         exitStatus = prepareStatus;
     } else {
         attempted = 1;
+        NSTimeInterval firstPressTime = -start.timeIntervalSinceNow;
         AXError firstError = PressNode(session.target);
         if (firstError == kAXErrorSuccess) {
             accepted = 1;
             if (!WaitForBurstTime(start, BurstHoldThreshold)) {
                 stopReason = @"key-up";
             } else {
-                NSTimeInterval interval = 1.0 / (NSTimeInterval)rate;
-                NSTimeInterval nextAttempt = BurstHoldThreshold;
+                NSTimeInterval nextAttempt = NextBurstAttemptTime(firstPressTime, rate);
                 while (YES) {
                     NSTimeInterval elapsed = -start.timeIntervalSinceNow;
                     if (elapsed >= BurstDurationLimit) { stopReason = @"duration-limit"; break; }
                     if (attempted >= BurstMaximumAttempts) { stopReason = @"count-limit"; break; }
-                    if (!WaitForBurstTime(start, nextAttempt)) { stopReason = @"key-up"; break; }
+                    if (!WaitForBurstTime(start, MIN(nextAttempt, BurstDurationLimit))) { stopReason = @"key-up"; break; }
+                    if (-start.timeIntervalSinceNow >= BurstDurationLimit) { stopReason = @"duration-limit"; break; }
+                    NSTimeInterval pressTime = -start.timeIntervalSinceNow;
                     attempted += 1;
                     AXError reactionError = PressNode(session.target);
                     if (reactionError != kAXErrorSuccess) {
                         AXError reacquireError = ReacquireReactionTarget(session);
-                        if (reacquireError == kAXErrorSuccess) reactionError = PressNode(session.target);
+                        if (BurstStopRequested()) { stopReason = @"key-up"; break; }
+                        if (-start.timeIntervalSinceNow >= BurstDurationLimit) { stopReason = @"duration-limit"; break; }
+                        if (reacquireError == kAXErrorSuccess) {
+                            pressTime = -start.timeIntervalSinceNow;
+                            reactionError = PressNode(session.target);
+                        }
                     }
                     if (reactionError != kAXErrorSuccess) {
                         stopReason = @"selection-error";
@@ -979,7 +1111,7 @@ static int BurstReaction(NSDictionary *reaction, NSInteger requestedRate) {
                         break;
                     }
                     accepted += 1;
-                    nextAttempt += interval;
+                    nextAttempt = NextBurstAttemptTime(pressTime, rate);
                 }
             }
         } else {
@@ -1026,39 +1158,43 @@ int main(int argc, const char *argv[]) {
             }
         }
         if (!RequireAccessibilityPermission()) return 1;
-        if ([command isEqualToString:@"inspect"]) return Inspect();
-        if ([command isEqualToString:@"inspect-controls"]) return InspectControls();
-        if ([command isEqualToString:@"status"]) {
-            NSDictionary *scan = ScanTeams();
-            if ([scan[@"applicationCount"] integerValue] == 0) {
+        @try {
+            if ([command isEqualToString:@"inspect"]) return Inspect();
+            if ([command isEqualToString:@"inspect-controls"]) return InspectControls();
+            if ([command isEqualToString:@"status"]) {
+                NSDictionary *scan = ScanMeetingControls(NO);
+                if ([scan[@"applicationCount"] integerValue] == 0) {
+                    WriteJSON(ResultForScan(scan, command, NO));
+                    fprintf(stderr, "Microsoft Teams is not running.\n");
+                    return 2;
+                }
                 WriteJSON(ResultForScan(scan, command, NO));
-                fprintf(stderr, "Microsoft Teams is not running.\n");
-                return 2;
+                return 0;
             }
-            WriteJSON(ResultForScan(scan, command, NO));
-            return 0;
-        }
-        if ([command isEqualToString:@"mute"]) return PerformDesiredControl(command, @"muted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
-        if ([command isEqualToString:@"unmute"]) return PerformDesiredControl(command, @"unmuted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
-        if ([command isEqualToString:@"camera-on"]) return PerformDesiredControl(command, @"on", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
-        if ([command isEqualToString:@"camera-off"]) return PerformDesiredControl(command, @"off", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
-        if ([command isEqualToString:@"hand-raise"]) return PerformDesiredControl(command, @"raised", @"hand", 40, ^NSInteger(AXNode *node) { return HandScore(node); }, ^NSString *(AXNode *node) { return HandStateForNode(node); });
-        if ([command isEqualToString:@"hand-lower"]) return PerformDesiredControl(command, @"lowered", @"hand", 40, ^NSInteger(AXNode *node) { return HandScore(node); }, ^NSString *(AXNode *node) { return HandStateForNode(node); });
-        if ([command isEqualToString:@"leave"]) return PerformLeave();
-        if ([command isEqualToString:@"blur-on"]) return PerformBlur(YES);
-        if ([command isEqualToString:@"blur-off"]) return PerformBlur(NO);
-        if ([command isEqualToString:@"react"]) return SendReaction(reaction, @"react");
-        if ([command isEqualToString:@"burst"]) {
-            NSInteger rate = argc == 4 ? [[NSString stringWithUTF8String:argv[3]] integerValue] : BurstDefaultRate;
-            if (rate < 1 || rate > BurstMaximumRate) {
-                fprintf(stderr, "Burst rate must be between 1 and 10.\n");
-                return 64;
+            if ([command isEqualToString:@"mute"]) return PerformDesiredControl(command, @"muted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
+            if ([command isEqualToString:@"unmute"]) return PerformDesiredControl(command, @"unmuted", @"microphone", 46, ^NSInteger(AXNode *node) { return MicrophoneScore(node); }, ^NSString *(AXNode *node) { return MicrophoneStateForNode(node); });
+            if ([command isEqualToString:@"camera-on"]) return PerformDesiredControl(command, @"on", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
+            if ([command isEqualToString:@"camera-off"]) return PerformDesiredControl(command, @"off", @"camera", 31, ^NSInteger(AXNode *node) { return CameraScore(node); }, ^NSString *(AXNode *node) { return CameraStateForNode(node); });
+            if ([command isEqualToString:@"hand-raise"]) return PerformDesiredControl(command, @"raised", @"hand", 40, ^NSInteger(AXNode *node) { return HandScore(node); }, ^NSString *(AXNode *node) { return HandStateForNode(node); });
+            if ([command isEqualToString:@"hand-lower"]) return PerformDesiredControl(command, @"lowered", @"hand", 40, ^NSInteger(AXNode *node) { return HandScore(node); }, ^NSString *(AXNode *node) { return HandStateForNode(node); });
+            if ([command isEqualToString:@"leave"]) return PerformLeave();
+            if ([command isEqualToString:@"blur-on"]) return PerformBlur(YES);
+            if ([command isEqualToString:@"blur-off"]) return PerformBlur(NO);
+            if ([command isEqualToString:@"react"]) return SendReaction(reaction, @"react");
+            if ([command isEqualToString:@"burst"]) {
+                NSInteger rate = argc == 4 ? [[NSString stringWithUTF8String:argv[3]] integerValue] : BurstDefaultRate;
+                if (rate < 1 || rate > BurstMaximumRate) {
+                    fprintf(stderr, "Burst rate must be between 1 and 10.\n");
+                    return 64;
+                }
+                return BurstReaction(reaction, rate);
             }
-            return BurstReaction(reaction, rate);
+            if (directReaction) return SendReaction(ReactionDefinitions()[command], @"react");
+            fprintf(stderr, "Unknown command.\n");
+            return 64;
+        } @finally {
+            DismissMeetingPicker();
         }
-        if (directReaction) return SendReaction(ReactionDefinitions()[command], @"react");
-        fprintf(stderr, "Unknown command.\n");
-        return 64;
     }
 }
 #endif

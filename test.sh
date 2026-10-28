@@ -18,6 +18,7 @@ xcrun clang \
   -framework Foundation \
   -framework ApplicationServices \
   -framework AppKit \
+  -framework Accessibility \
   "$script_dir/tests/LauncherScoringTests.m" \
   -o "$test_binary"
 
