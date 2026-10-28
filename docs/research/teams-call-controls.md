@@ -94,6 +94,8 @@ The Microsoft Graph [call mute endpoint](https://learn.microsoft.com/en-us/graph
 
 The current [Teams meeting apps API list](https://learn.microsoft.com/en-us/microsoftteams/platform/apps-in-teams-meetings/meeting-apps-apis) covers meeting context, participant lookup, notifications, captions, meeting events, and sharing app content to the stage. It does not expose the requested native meeting controls. Building a Teams app would add tenant deployment, authentication, and admin-policy work without solving this problem.
 
+See [Teams companion app research](teams-app-companion.md) for the focused October 2026 assessment of Store distribution, app-to-plugin connections, incoming speaker audio, Graph, and custom calling clients.
+
 ### Why interface control is a credible post-retirement direction
 
 This repository's live test is the strongest evidence for this exact implementation. Current commercial evidence points in the same direction. MuteDeck removed Teams pairing after the API retirement and reports that Teams continues to work through interface control on macOS. Its August 2026 changelog also records real maintenance issues around changed Teams controls, second displays, focus, localization, and compact sharing UI. See [MuteDeck 4.9.3](https://mutedeck.com/changelog/mutedeck-v493).
