@@ -27,6 +27,54 @@ static void Expect(BOOL condition, NSString *message, int *failures) {
 int main(void) {
     @autoreleasepool {
         int failures = 0;
+
+        NSMutableArray<AXNode *> *busyWindow = [NSMutableArray array];
+        for (NSInteger index = 0; index < 1000; index += 1) {
+            AXNode *node = Button(@"Unrelated meeting content", @"unrelated-content", 12);
+            if (index % 5 != 0) node.actions = @[];
+            [busyWindow addObject:node];
+        }
+        [busyWindow addObject:Button(@"Unmute mic", @"microphone-button", 10)];
+        [busyWindow addObject:Button(@"Turn camera off", @"camera-button", 10)];
+        NSTimeInterval snapshotStart = NSProcessInfo.processInfo.systemUptime;
+        MarkMeetingReactionPicker(busyWindow);
+        NSDictionary *busyState = StateSnapshot(@{@"elements": busyWindow});
+        NSTimeInterval snapshotElapsed = NSProcessInfo.processInfo.systemUptime - snapshotStart;
+        Expect([busyState[@"microphone"] isEqualToString:@"muted"] && [busyState[@"camera"] isEqualToString:@"on"], @"large meeting scans must preserve exact control state", &failures);
+        Expect(snapshotElapsed < 0.25, [NSString stringWithFormat:@"parsing a 1000-node meeting must stay below 250ms (was %.0fms)", snapshotElapsed * 1000], &failures);
+
+        AXError missingAttribute = kAXErrorAttributeUnsupported;
+        id missingValue = CFBridgingRelease(AXValueCreate(kAXValueAXErrorType, &missingAttribute));
+        NSDictionary *attributes = AttributeDictionary(@[@"AXRole", @"AXIdentifier", @"AXDOMIdentifier", @"AXHelp", @"AXSelected"],
+            @[@"AXButton", missingValue, @"microphone-button", NSNull.null, @YES]);
+        AXNode *batchedNode = Button(@"", @"", 10);
+        PopulateNode(batchedNode, attributes);
+        Expect([batchedNode.identifier isEqualToString:@"microphone-button"], @"batched unsupported identifier must use the DOM identifier", &failures);
+        Expect(batchedNode.selected && batchedNode.helpText.length == 0, @"batched errors and missing attributes must preserve safe defaults", &failures);
+
+        AXNode *originalMic = Button(@"Unmute mic", @"microphone-button", 10);
+        AXNode *originalCamera = Button(@"Turn camera off", @"camera-button", 10);
+        NSDictionary *originalScan = @{@"applicationCount": @1, @"elements": @[originalMic, originalCamera, busyWindow[1]]};
+        NSArray *stateControls = StateControlNodes(originalScan);
+        __block NSInteger refreshedCount = 0;
+        NSDictionary *refreshed = RefreshControlScan(originalScan, stateControls, ^AXNode *(AXNode *node) {
+            refreshedCount += 1;
+            return Button(node == originalMic ? @"Mute mic" : @"Turn camera off", node.identifier, node.depth);
+        });
+        Expect(refreshedCount == 2, @"verification must read state controls without walking unrelated meeting content", &failures);
+        Expect([StateSnapshot(refreshed)[@"microphone"] isEqualToString:@"unmuted"], @"verification must use fresh microphone labels", &failures);
+        Expect([StateSnapshot(refreshed)[@"camera"] isEqualToString:@"on"], @"verification must also refresh other state controls", &failures);
+        Expect([StateSnapshot(originalScan)[@"microphone"] isEqualToString:@"muted"], @"verification must not overwrite the original snapshot", &failures);
+        NSDictionary *disappeared = RefreshControlScan(originalScan, stateControls, ^AXNode *(AXNode *node) {
+            return Button(@"", @"", node.depth);
+        });
+        Expect([StateSnapshot(disappeared)[@"microphone"] isEqualToString:@"unavailable"], @"replaced controls must not confirm cached state", &failures);
+        NSDictionary *ambiguousScan = @{@"applicationCount": @1, @"elements": @[originalMic, Button(@"Unmute mic", @"other-microphone-button", 10)]};
+        NSDictionary *ambiguousRefresh = RefreshControlScan(ambiguousScan, StateControlNodes(ambiguousScan), ^AXNode *(AXNode *node) {
+            return Button(@"Mute mic", node.identifier, node.depth);
+        });
+        Expect([StateSnapshot(ambiguousRefresh)[@"microphone"] isEqualToString:@"unknown"], @"verification must retain every ambiguous candidate", &failures);
+
         Expect(BurstDurationLimit == 5.0, @"reaction hold guard must allow five seconds", &failures);
         Expect(BurstMaximumAttempts >= (NSInteger)ceil(BurstDurationLimit * BurstMaximumRate), @"attempt cap must allow the configured duration at the maximum supported rate", &failures);
         NSTimeInterval interval = 1.0 / 7.0;

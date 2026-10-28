@@ -65,61 +65,100 @@ static CFStringRef const AXScrollToVisibleAction = CFSTR("AXScrollToVisible");
 @end
 
 static NSDictionary<NSString *, NSDictionary *> *ReactionDefinitions(void) {
-    return @{
+    static NSDictionary *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @{
         @"like": @{@"name": @"Like", @"labels": @[@"like", @"thumbs up", @"thumb up", @"vind ik leuk", @"duim omhoog", @"gefällt mir", @"j'aime", @"me gusta"]},
         @"love": @{@"name": @"Love", @"labels": @[@"love", @"heart", @"hart", @"liebe", @"coeur", @"cœur", @"corazón", @"corazon"]},
         @"applause": @{@"name": @"Applause", @"labels": @[@"applause", @"clap", @"clapping", @"applaus", @"applaudissements", @"aplausos"]},
         @"laugh": @{@"name": @"Laugh", @"labels": @[@"laugh", @"laughing", @"lachen", @"rire", @"risa"]},
         @"surprise": @{@"name": @"Surprise", @"labels": @[@"surprise", @"surprised", @"wow", @"verrast", @"überrascht", @"surpris", @"sorpresa"]}
-    };
+    }; });
+    return values;
 }
 
 static NSArray<NSString *> *LauncherLabels(void) {
-    return @[@"react", @"reaction", @"reactions", @"reageren", @"reactie", @"reacties", @"réagir", @"réaction", @"réactions", @"reagieren", @"reaktion", @"reaktionen", @"reaccionar", @"reacción", @"reacciones"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"react", @"reaction", @"reactions", @"reageren", @"reactie", @"reacties", @"réagir", @"réaction", @"réactions", @"reagieren", @"reaktion", @"reaktionen", @"reaccionar", @"reacción", @"reacciones"]; });
+    return values;
 }
 
 static NSArray<NSString *> *MuteLabels(void) {
-    return @[@"mute", @"mute mic", @"mute microphone", @"dempen", @"microfoon dempen", @"stummschalten", @"mikrofon stummschalten", @"désactiver le micro", @"silenciar", @"silenciar micrófono"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"mute", @"mute mic", @"mute microphone", @"dempen", @"microfoon dempen", @"stummschalten", @"mikrofon stummschalten", @"désactiver le micro", @"silenciar", @"silenciar micrófono"]; });
+    return values;
 }
 
 static NSArray<NSString *> *UnmuteLabels(void) {
-    return @[@"unmute", @"unmute mic", @"unmute microphone", @"dempen opheffen", @"microfoon inschakelen", @"stummschaltung aufheben", @"mikrofon einschalten", @"activer le micro", @"reactivar audio", @"activar micrófono"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"unmute", @"unmute mic", @"unmute microphone", @"dempen opheffen", @"microfoon inschakelen", @"stummschaltung aufheben", @"mikrofon einschalten", @"activer le micro", @"reactivar audio", @"activar micrófono"]; });
+    return values;
 }
 
 static NSArray<NSString *> *CameraOffLabels(void) {
-    return @[@"turn camera off", @"stop video", @"camera uitschakelen", @"video stoppen", @"kamera ausschalten", @"désactiver la caméra", @"desactivar la cámara"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"turn camera off", @"stop video", @"camera uitschakelen", @"video stoppen", @"kamera ausschalten", @"désactiver la caméra", @"desactivar la cámara"]; });
+    return values;
 }
 
 static NSArray<NSString *> *CameraOnLabels(void) {
-    return @[@"turn camera on", @"start video", @"camera inschakelen", @"video starten", @"kamera einschalten", @"activer la caméra", @"activar la cámara"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"turn camera on", @"start video", @"camera inschakelen", @"video starten", @"kamera einschalten", @"activer la caméra", @"activar la cámara"]; });
+    return values;
 }
 
 static NSArray<NSString *> *RaiseHandLabels(void) {
-    return @[@"raise your hand", @"raise hand", @"hand opsteken", @"steek uw hand op", @"hand heben", @"lever la main", @"levantar la mano"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"raise your hand", @"raise hand", @"hand opsteken", @"steek uw hand op", @"hand heben", @"lever la main", @"levantar la mano"]; });
+    return values;
 }
 
 static NSArray<NSString *> *LowerHandLabels(void) {
-    return @[@"lower your hand", @"lower hand", @"hand omlaag", @"uw hand omlaag doen", @"hand senken", @"baisser la main", @"bajar la mano"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"lower your hand", @"lower hand", @"hand omlaag", @"uw hand omlaag doen", @"hand senken", @"baisser la main", @"bajar la mano"]; });
+    return values;
 }
 
 static NSArray<NSString *> *LeaveLabels(void) {
-    return @[@"leave", @"leave call", @"hang up", @"verlaten", @"gesprek verlaten", @"auflegen", @"besprechung verlassen", @"quitter", @"quitter l'appel", @"salir", @"salir de la llamada"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"leave", @"leave call", @"hang up", @"verlaten", @"gesprek verlaten", @"auflegen", @"besprechung verlassen", @"quitter", @"quitter l'appel", @"salir", @"salir de la llamada"]; });
+    return values;
 }
 
 static NSArray<NSString *> *EffectsLauncherLabels(void) {
-    return @[@"open video options", @"video effects and settings", @"backgrounds and effects", @"effects and avatars", @"video effects", @"achtergronden en effecten", @"video-effecten", @"hintergründe und effekte", @"effets vidéo", @"arrière-plans et effets", @"fondos y efectos", @"efectos de vídeo"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"open video options", @"video effects and settings", @"backgrounds and effects", @"effects and avatars", @"video effects", @"achtergronden en effecten", @"video-effecten", @"hintergründe und effekte", @"effets vidéo", @"arrière-plans et effets", @"fondos y efectos", @"efectos de vídeo"]; });
+    return values;
 }
 
 static NSArray<NSString *> *BlurLabels(void) {
-    return @[@"blur", @"standard blur", @"background blur", @"vervagen", @"achtergrond vervagen", @"weichzeichnen", @"hintergrund weichzeichnen", @"flou", @"flouter l’arrière-plan", @"desenfocar", @"desenfocar fondo"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"blur", @"standard blur", @"background blur", @"vervagen", @"achtergrond vervagen", @"weichzeichnen", @"hintergrund weichzeichnen", @"flou", @"flouter l’arrière-plan", @"desenfocar", @"desenfocar fondo"]; });
+    return values;
 }
 
 static NSArray<NSString *> *NoEffectLabels(void) {
-    return @[@"none", @"no effect", @"no background", @"no background effect", @"geen", @"geen effect", @"zonder achtergrond", @"keine", @"kein effekt", @"aucun", @"aucun effet", @"ninguno", @"sin efecto"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"none", @"no effect", @"no background", @"no background effect", @"geen", @"geen effect", @"zonder achtergrond", @"keine", @"kein effekt", @"aucun", @"aucun effet", @"ninguno", @"sin efecto"]; });
+    return values;
 }
 
 static NSArray<NSString *> *ApplyLabels(void) {
-    return @[@"apply", @"apply and turn on video", @"toepassen", @"toepassen en video inschakelen", @"anwenden", @"appliquer", @"aplicar"];
+    static NSArray<NSString *> *values;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ values = @[@"apply", @"apply and turn on video", @"toepassen", @"toepassen en video inschakelen", @"anwenden", @"appliquer", @"aplicar"]; });
+    return values;
 }
 
 static void PrintUsage(const char *executablePath) {
@@ -161,21 +200,76 @@ static NSString *CustomDescription(id content) {
     return @"";
 }
 
-static NSString *StringAttribute(AXUIElementRef element, CFStringRef attribute) {
-    id value = CopyAttribute(element, attribute);
+// One IPC request per element replaces individual requests for each property.
+static NSArray<NSString *> *NodeAttributeNames(void) {
+    static NSArray<NSString *> *names;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        names = @[(__bridge NSString *)kAXRoleAttribute, (__bridge NSString *)kAXIdentifierAttribute,
+            @"AXDOMIdentifier", (__bridge NSString *)kAXTitleAttribute, (__bridge NSString *)kAXDescriptionAttribute,
+            (__bridge NSString *)kAXHelpAttribute, @"AXCustomContent", (__bridge NSString *)kAXValueAttribute,
+            (__bridge NSString *)kAXSelectedAttribute, (__bridge NSString *)kAXChildrenAttribute];
+    });
+    return names;
+}
+
+static NSDictionary *AttributeDictionary(NSArray<NSString *> *names, NSArray *values) {
+    NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
+    for (NSUInteger index = 0; index < MIN(names.count, values.count); index += 1) {
+        id value = values[index];
+        if (value == NSNull.null) continue;
+        if (CFGetTypeID((__bridge CFTypeRef)value) == AXValueGetTypeID()
+            && AXValueGetType((__bridge AXValueRef)value) == kAXValueAXErrorType) continue;
+        attributes[names[index]] = value;
+    }
+    return attributes;
+}
+
+static NSDictionary *NodeAttributes(AXUIElementRef element) {
+    NSArray *names = NodeAttributeNames();
+    CFArrayRef values = NULL;
+    AXError error = AXUIElementCopyMultipleAttributeValues(element, (__bridge CFArrayRef)names, 0, &values);
+    if (error == kAXErrorSuccess && values) return AttributeDictionary(names, CFBridgingRelease(values));
+    if (values) CFRelease(values);
+    // Older Accessibility providers can lack multiple-attribute support.
+    NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
+    if (error != kAXErrorNotImplemented && error != kAXErrorAttributeUnsupported) return attributes;
+    for (NSString *name in names) {
+        id value = CopyAttribute(element, (__bridge CFStringRef)name);
+        if (value) attributes[name] = value;
+    }
+    return attributes;
+}
+
+static NSString *AttributeString(id value) {
     if ([value isKindOfClass:NSString.class]) return value;
     if ([value isKindOfClass:NSNumber.class]) return [value stringValue];
     return @"";
 }
 
-static BOOL BooleanAttribute(AXUIElementRef element, CFStringRef attribute) {
-    id value = CopyAttribute(element, attribute);
+static BOOL AttributeBoolean(id value) {
     if ([value isKindOfClass:NSNumber.class]) return [value boolValue];
-    if ([value isKindOfClass:NSString.class]) {
-        NSString *normalized = [value lowercaseString];
-        return [normalized isEqualToString:@"true"] || [normalized isEqualToString:@"selected"] || [normalized isEqualToString:@"on"] || [normalized isEqualToString:@"1"];
-    }
-    return NO;
+    if (![value isKindOfClass:NSString.class]) return NO;
+    return [@[@"true", @"selected", @"on", @"1"] containsObject:[value lowercaseString]];
+}
+
+static void PopulateNode(AXNode *node, NSDictionary *attributes) {
+    node.role = AttributeString(attributes[(__bridge NSString *)kAXRoleAttribute]);
+    node.identifier = AttributeString(attributes[(__bridge NSString *)kAXIdentifierAttribute]);
+    if (node.identifier.length == 0) node.identifier = AttributeString(attributes[@"AXDOMIdentifier"]);
+    node.title = AttributeString(attributes[(__bridge NSString *)kAXTitleAttribute]);
+    node.nodeDescription = AttributeString(attributes[(__bridge NSString *)kAXDescriptionAttribute]);
+    node.helpText = AttributeString(attributes[(__bridge NSString *)kAXHelpAttribute]);
+    node.customDescription = CustomDescription(attributes[@"AXCustomContent"]);
+    node.value = AttributeString(attributes[(__bridge NSString *)kAXValueAttribute]);
+    node.selected = AttributeBoolean(attributes[(__bridge NSString *)kAXSelectedAttribute]);
+}
+
+static NSString *StringAttribute(AXUIElementRef element, CFStringRef attribute) {
+    id value = CopyAttribute(element, attribute);
+    if ([value isKindOfClass:NSString.class]) return value;
+    if ([value isKindOfClass:NSNumber.class]) return [value stringValue];
+    return @"";
 }
 
 static NSArray *ElementArrayAttribute(AXUIElementRef element, CFStringRef attribute) {
@@ -235,20 +329,15 @@ static NSArray<AXNode *> *CollectElements(AXUIElementRef root, pid_t pid, NSStri
         node.pid = pid;
         node.processName = processName;
         node.windowTitle = windowTitle;
-        node.role = StringAttribute(element, kAXRoleAttribute);
-        node.identifier = StringAttribute(element, kAXIdentifierAttribute);
-        if (node.identifier.length == 0) node.identifier = StringAttribute(element, CFSTR("AXDOMIdentifier"));
-        node.title = StringAttribute(element, kAXTitleAttribute);
-        node.nodeDescription = StringAttribute(element, kAXDescriptionAttribute);
-        node.helpText = StringAttribute(element, kAXHelpAttribute);
-        node.customDescription = CustomDescription(CopyAttribute(element, CFSTR("AXCustomContent")));
-        node.value = StringAttribute(element, kAXValueAttribute);
+        NSDictionary *attributes = NodeAttributes(element);
+        PopulateNode(node, attributes);
         node.actions = Actions(element);
         node.depth = depth;
         node.focusedWindow = SameElement(focusedWindow, root);
-        node.selected = BooleanAttribute(element, kAXSelectedAttribute);
         [result addObject:node];
-        for (id childObject in [ElementArrayAttribute(element, kAXChildrenAttribute) reverseObjectEnumerator]) {
+        id children = attributes[(__bridge NSString *)kAXChildrenAttribute];
+        if (![children isKindOfClass:NSArray.class]) children = @[];
+        for (id childObject in [children reverseObjectEnumerator]) {
             if (CFGetTypeID((__bridge CFTypeRef)childObject) != AXUIElementGetTypeID()) continue;
             [stack addObject:@{@"element": childObject, @"depth": @(depth + 1)}];
         }
@@ -306,13 +395,14 @@ static BOOL EqualsAny(NSString *text, NSArray<NSString *> *labels) {
 }
 
 static BOOL ActionFieldMatches(NSString *field, NSArray<NSString *> *labels) {
+    if (field.length == 0) return NO;
     NSString *normalized = Normalized(field);
-    for (NSString *labelValue in labels) {
-        NSString *label = Normalized(labelValue);
-        if ([normalized isEqualToString:label]) return YES;
-        for (NSString *separator in @[@" (", @", ", @" | ", @". "]) {
-            if ([normalized hasPrefix:[label stringByAppendingString:separator]]) return YES;
-        }
+    // The shared label tables are already lowercase and trimmed.
+    for (NSString *label in labels) {
+        if (![normalized hasPrefix:label]) continue;
+        if (normalized.length == label.length) return YES;
+        NSString *suffix = [normalized substringFromIndex:label.length];
+        if ([suffix hasPrefix:@" ("] || [suffix hasPrefix:@", "] || [suffix hasPrefix:@" | "] || [suffix hasPrefix:@". "]) return YES;
     }
     return NO;
 }
@@ -360,6 +450,7 @@ static NSInteger ReactionScore(AXNode *node, NSDictionary *reaction) {
 }
 
 static NSInteger MicrophoneScore(AXNode *node) {
+    if (!node.canPress) return NSIntegerMin;
     if (!NodeMatchesAction(node, MuteLabels()) && !NodeMatchesAction(node, UnmuteLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     if ([node.identifier.lowercaseString containsString:@"microphone"] || [node.identifier.lowercaseString containsString:@"mic-"]) score += 30;
@@ -368,6 +459,7 @@ static NSInteger MicrophoneScore(AXNode *node) {
 }
 
 static NSInteger CameraScore(AXNode *node) {
+    if (!node.canPress) return NSIntegerMin;
     if (!NodeMatchesAction(node, CameraOnLabels()) && !NodeMatchesAction(node, CameraOffLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     if ([node.identifier.lowercaseString containsString:@"camera"] || [node.identifier.lowercaseString containsString:@"video"]) score += 30;
@@ -391,6 +483,7 @@ static void MarkMeetingReactionPicker(NSArray<AXNode *> *nodes) {
 }
 
 static NSInteger HandScore(AXNode *node) {
+    if (!node.canPress) return NSIntegerMin;
     if (!NodeMatchesAction(node, RaiseHandLabels()) && !NodeMatchesAction(node, LowerHandLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     if ([node.identifier.lowercaseString containsString:@"hand"]) score += 30;
@@ -398,6 +491,7 @@ static NSInteger HandScore(AXNode *node) {
 }
 
 static NSInteger LeaveScore(AXNode *node) {
+    if (!node.canPress) return NSIntegerMin;
     NSString *text = node.searchableText;
     if ([text containsString:@"end meeting"] || [text containsString:@"for all"] || [text containsString:@"decline"] || [text containsString:@"dismiss"]) return NSIntegerMin;
     if (!NodeMatchesAction(node, LeaveLabels())) return NSIntegerMin;
@@ -407,6 +501,7 @@ static NSInteger LeaveScore(AXNode *node) {
 }
 
 static NSInteger EffectsLauncherScore(AXNode *node) {
+    if (!node.canPress) return NSIntegerMin;
     if (!NodeMatchesAction(node, EffectsLauncherLabels())) return NSIntegerMin;
     NSInteger score = BaseControlScore(node);
     NSString *identifier = node.identifier.lowercaseString;
@@ -435,6 +530,7 @@ static NSInteger NoEffectOptionScore(AXNode *node) {
 }
 
 static NSInteger ApplyScore(AXNode *node) {
+    if (!node.canPress) return NSIntegerMin;
     if (!NodeMatchesAction(node, ApplyLabels())) return NSIntegerMin;
     return BaseControlScore(node) + 20;
 }
@@ -557,6 +653,39 @@ static NSDictionary *StateSnapshot(NSDictionary *scan) {
     if (!blurAmbiguous && blur.selected) blurState = @"on";
     if (!noneAmbiguous && none.selected) blurState = @"off";
     return @{@"meetingActive": @(meetingActive), @"microphone": microphoneState, @"camera": cameraState, @"backgroundBlur": blurState, @"hand": handState};
+}
+
+static NSArray<AXNode *> *StateControlNodes(NSDictionary *scan) {
+    NSMutableArray *controls = [NSMutableArray array];
+    for (AXNode *node in scan[@"elements"]) {
+        if (!node.canPress) continue;
+        if (MicrophoneScore(node) > 0 || CameraScore(node) > 0 || HandScore(node) > 0
+            || LauncherScore(node) > 0 || LeaveScore(node) > 0 || EffectsLauncherScore(node) > 0
+            || BlurOptionScore(node) > 0 || NoEffectOptionScore(node) > 0) [controls addObject:node];
+    }
+    return controls;
+}
+
+static AXNode *RefreshNode(AXNode *node) {
+    AXNode *fresh = [AXNode new];
+    fresh.elementObject = node.elementObject;
+    fresh.pid = node.pid;
+    fresh.processName = node.processName;
+    fresh.windowTitle = node.windowTitle;
+    fresh.depth = node.depth;
+    fresh.focusedWindow = node.focusedWindow;
+    fresh.meetingReactionPicker = node.meetingReactionPicker;
+    PopulateNode(fresh, NodeAttributes(node.element));
+    fresh.actions = Actions(node.element);
+    return fresh;
+}
+
+// Refresh every known state control, including ambiguous candidates. Missing or
+// replaced elements produce unavailable state and force rediscovery by the caller.
+static NSDictionary *RefreshControlScan(NSDictionary *scan, NSArray<AXNode *> *controls, AXNode *(^readNode)(AXNode *)) {
+    NSMutableArray *fresh = [NSMutableArray array];
+    for (AXNode *node in controls) [fresh addObject:readNode(node)];
+    return @{@"applicationCount": scan[@"applicationCount"] ?: @0, @"elements": fresh};
 }
 
 static NSMutableDictionary *ResultForScan(NSDictionary *scan, NSString *command, BOOL changed) {
@@ -714,18 +843,31 @@ static int PerformDesiredControl(NSString *command, NSString *desiredState, NSSt
         return 12;
     }
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:VerificationTimeout];
+    BOOL directVerification = [family isEqualToString:@"microphone"] || [family isEqualToString:@"camera"];
+    NSArray<AXNode *> *stateControls = directVerification ? StateControlNodes(initialScan) : nil;
     NSDictionary *currentScan;
     do {
-        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
-        currentScan = [family isEqualToString:@"hand"] ? WithMeetingToolbarState(ScanTeams()) : ScanMeetingControls(NO);
+        if (directVerification) {
+            currentScan = RefreshControlScan(initialScan, stateControls, ^AXNode *(AXNode *node) { return RefreshNode(node); });
+        } else {
+            [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.12]];
+            currentScan = WithMeetingToolbarState(ScanTeams());
+        }
         BOOL currentAmbiguous = NO;
         AXNode *currentControl = BestUniqueNode(currentScan[@"elements"], scorer, &currentAmbiguous);
+        if (directVerification && !currentControl && !currentAmbiguous) {
+            // Teams replaced the toolbar. Rediscover without pressing a second time.
+            currentScan = ScanMeetingControls(NO);
+            stateControls = StateControlNodes(currentScan);
+            currentControl = BestUniqueNode(currentScan[@"elements"], scorer, &currentAmbiguous);
+        }
         BOOL confirmed = !currentAmbiguous && currentControl && [stateReader(currentControl) isEqualToString:desiredState];
         if ([family isEqualToString:@"hand"] && !currentAmbiguous) confirmed = [StateSnapshot(currentScan)[@"hand"] isEqualToString:desiredState];
         if (confirmed) {
             WriteJSON(ResultForScan(currentScan, command, YES));
             return 0;
         }
+        if (directVerification) [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     } while (deadline.timeIntervalSinceNow > 0);
     WriteJSON(ResultForScan(currentScan, command, YES));
     fprintf(stderr, "Teams accepted the %s action, but the requested state was not confirmed.\n", family.UTF8String);
@@ -977,7 +1119,6 @@ static AXNode *FindReactionTarget(NSDictionary *reaction, AXNode *launcher, NSSe
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
     AXNode *target = nil;
     do {
-        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.08]];
         NSArray<AXNode *> *currentElements = (fullScan ? ScanTeams() : ScanTeamsForPID(launcher.pid))[@"elements"];
         target = BestNode(currentElements, ^NSInteger(AXNode *node) {
             NSInteger score = ReactionScore(node, reaction);
@@ -986,6 +1127,9 @@ static AXNode *FindReactionTarget(NSDictionary *reaction, AXNode *launcher, NSSe
             if (initialIdentities && ![initialIdentities containsObject:@(CFHash(node.element))]) score += 80;
             return score;
         });
+        if (!target && deadline.timeIntervalSinceNow > 0) {
+            [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:MIN(0.02, deadline.timeIntervalSinceNow)]];
+        }
     } while (!target && deadline.timeIntervalSinceNow > 0);
     return target;
 }

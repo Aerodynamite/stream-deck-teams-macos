@@ -15,7 +15,7 @@ The plugin does not use mouse coordinates, screen capture, image recognition, Te
 
 ## Current status
 
-Version `0.2.0.3` implements the new actions, plugin-controlled two-state keys, explicit desired-state commands, JSON state results, control-specific safety rules, optional process-targeted keyboard fallbacks, and native long-press reaction sessions.
+Version `0.2.0.4` implements the new actions, plugin-controlled two-state keys, explicit desired-state commands, JSON state results, control-specific safety rules, optional process-targeted keyboard fallbacks, and native long-press reaction sessions.
 
 Automated tests cover command allow-listing, JSON validation, process locking, burst cancellation and timeout handling, exact control selection, state derivation, and the original regression that distinguishes the meeting **React** button from **Raise your hand** and **React to this message**.
 
@@ -126,6 +126,8 @@ Success feedback is shown once when the session ends. Logs contain only aggregat
 ## Control state behavior
 
 Mute, camera, and hand actions use two Stream Deck states with automatic state changes disabled. The plugin asks the helper for current state when an action appears and updates all visible control keys after every completed command.
+
+Accessibility attributes are read in batches and label definitions are shared within each helper process. Mute and camera changes verify fresh attributes on the discovered state controls immediately, then poll every 20 ms while awaiting confirmation. If Teams replaces the target, the helper performs a full scan without pressing it a second time. This avoids a second full tree traversal and a fixed 120 ms wait on the normal path while preserving state confirmation and the operation lock. Reactions also check for the picker immediately rather than waiting before their first scan.
 
 Commands request an explicit result instead of blindly toggling:
 

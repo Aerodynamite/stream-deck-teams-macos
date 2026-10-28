@@ -131,3 +131,24 @@ These are Accessibility acceptance and timing results. Second-participant delive
 The session limit is now five seconds, including picker setup, at the unchanged default of 7 presses per second. The native attempt cap is 50 to support the maximum permitted rate of 10 per second; the Node watchdog allows 6500 ms for the session and cleanup.
 
 A live native Love hold accepted 21 of 21 presses and stopped with `duration-limit` at 5000 ms. A subsequent run through the Node runner accepted 23 of 23 and stopped at 5002 ms without triggering its watchdog. The first live attempt failed with a Teams reaction-control error; the two later attempts passed without code changes. Delivery to another participant and window/focus variants remain unverified.
+
+## 2026-10-28 control latency check
+
+Client: Teams `26276.505.5234.9924`, English UI, active meeting. Microphone and camera changes were explicitly approved for this check and restored to their starting states: microphone muted, camera on. Leave was not pressed.
+
+The initial read-only status benchmark took 1954, 3458, and 2000 ms. Aggregate instrumentation found about 9200 individual attribute reads per scan, roughly 300 ms in picker recognition, and roughly 820 ms in state scoring. The changes share immutable label definitions, avoid repeated label-prefix allocation, skip scoring non-actionable nodes, and batch Accessibility attributes. Optimized status scans measured 350 to 762 ms across the later checks. Temporary instrumentation was removed.
+
+Mute and camera verification now refreshes the discovered state controls immediately, with 20 ms polling while waiting for confirmation. If the target disappears, verification falls back to full discovery without pressing again. The operation lock remains held until confirmation or failure.
+
+| Command | Previous helper | Optimized helper |
+|---|---:|---:|
+| Unmute | 3913 ms | 652 ms |
+| Mute | 4395 ms | 390 ms |
+| Camera off | Not measured | 508 ms |
+| Camera on | Not measured | 495 ms |
+
+These are process launch through confirmed JSON result timings, not visual frame timings. A second microphone check through the Node coordinator and the installed `0.2.0.4` helper completed unmute in 435 ms and the immediately following mute in 425 ms. Both commands were accepted without an added delay. The installed manifest, both binary hashes, and a new plugin process were verified.
+
+The native regression fixture previously took 833 ms to parse a 1000-node meeting and failed its 250 ms budget; it now passes. Tests also cover batched missing/error attributes, fresh verification state, disappeared controls, and preserved ambiguity.
+
+Physical Stream Deck key-to-frame timing, toolbar and focus variants, other languages, Leave safety, and reaction delivery after these optimizations remain unverified. Reactions benefit from faster scans and check for the picker immediately; their tap and hold behavior still needs live qualification on this build.
