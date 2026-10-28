@@ -2,6 +2,8 @@
 
 Last reviewed: 2026-09-23. Original research: 2026-09-02.
 
+Publisher decisions from the subsequent interview are recorded in the [publication plan](publication-plan.md), with [unanswered questions](publication-questions.md) saved for continuation. Use that plan for the agreed publisher, budget, release scope, and licensing intent. This research document retains its dated technical snapshot; interview answers are not new test results or confirmation of Marketplace acceptance.
+
 ## Scope
 
 This document applies to **Teams Meeting Controls** on `main`, inspected at commit `ed3fdf5c1187c16e8c6e87270886a5565abb2622`. The checkout was clean before this documentation review. The meeting-control feature has been merged. Version `0.2.0.0` exposes nine actions: Mute, Camera, Raise Hand, Leave Call, and five reactions.
