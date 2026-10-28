@@ -60,7 +60,7 @@ Stream Deck action
 
 The helper in [TeamsReactionPOC.m](../../TeamsReactionPOC.m) discovers Teams processes, walks the Accessibility tree, scores controls by role, identifier, localized text, meeting window, and action support, then calls `AXUIElementPerformAction`. It does not use coordinates, screenshots, image recognition, or a network service.
 
-This path has been verified locally for reactions in a live meeting with Teams `26213.1006.5011.1671`. The live tree exposed `Raise your hand` and `React` as pressable `AXButton` elements. The current helper correctly distinguishes the meeting `React` button from `Raise your hand` and `React to this message`. See [PLUGIN_HANDOFF.md](../../PLUGIN_HANDOFF.md) for the captured evidence and regression history.
+This path has been verified locally for reactions in a live meeting with Teams `26213.1006.5011.1671`. The live tree exposed `Raise your hand` and `React` as pressable `AXButton` elements. The current helper correctly distinguishes the meeting `React` button from `Raise your hand` and `React to this message`. See [PLUGIN_HANDOFF.md](PLUGIN_HANDOFF.md) for the captured evidence and regression history.
 
 What is proven:
 
