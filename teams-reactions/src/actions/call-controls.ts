@@ -213,7 +213,9 @@ function disarmLeave(context: string): boolean {
 	const actionInstance = armedLeaveKeys.get(context);
 	armedLeaveKeys.delete(context);
 	const cancelled = leaveHold.release(context) === "cancelled";
-	if (actionInstance) void actionInstance.setImage().catch(() => undefined);
+	if (actionInstance) {
+		void actionInstance.setImage().catch(() => streamDeck.logger.warn("Could not restore the Leave key image after disarming."));
+	}
 	return cancelled;
 }
 
@@ -258,8 +260,8 @@ export class LeaveAction extends SingletonAction {
 	}
 
 	private async leave(actionInstance: KeyAction): Promise<void> {
-		await actionInstance.setImage();
 		try {
+			await actionInstance.setImage();
 			const execution = await commandCoordinator.execute("leave");
 			if (execution.status === "busy") {
 				streamDeck.logger.warn("Ignored leave because another Teams operation is running.");
