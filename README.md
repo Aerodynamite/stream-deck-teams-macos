@@ -51,6 +51,8 @@ ambiguous, busy, or failed.
 - Hold it to repeat at 7 attempts per second, starting after about 300 ms.
 - Release to stop. Each hold is limited to five seconds, including picker setup.
 - Reactions in Multi Actions send once. Only one Teams operation runs at a time.
+- Hold **Leave Call** for 1.5 seconds to leave. The key turns red while armed;
+  releasing early cancels with a yellow alert. Leave is refused in Multi Actions.
 
 Reaction acceptance does not prove delivery to another participant. Test **Leave
 Call** in a disposable meeting before relying on it.

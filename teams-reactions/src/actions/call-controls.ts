@@ -2,6 +2,7 @@ import streamDeck, {
 	action,
 	type KeyAction,
 	type KeyDownEvent,
+	type KeyUpEvent,
 	type State,
 	SingletonAction,
 	type WillAppearEvent,
@@ -13,12 +14,14 @@ import {
 	type TeamsCommand,
 	type TeamsState,
 } from "../helper-runner";
+import { HoldGate } from "../hold-gate";
 import { commandCoordinator, operationLock, persistentControls } from "../teams-services";
 
 type StateField = "microphone" | "camera" | "hand";
 type KnownState = "muted" | "unmuted" | "on" | "off" | "raised" | "lowered";
 
 const UNKNOWN_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="22" fill="#24262b"/><circle cx="72" cy="72" r="41" fill="none" stroke="#f0b429" stroke-width="9"/><text x="72" y="91" text-anchor="middle" font-family="Arial,sans-serif" font-size="58" font-weight="700" fill="#f0b429">?</text></svg>`;
+const LEAVE_ARMED_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="22" fill="#b3261e"/><text x="72" y="66" text-anchor="middle" font-family="Arial,sans-serif" font-size="30" font-weight="700" fill="#ffffff">HOLD</text><text x="72" y="104" text-anchor="middle" font-family="Arial,sans-serif" font-size="26" font-weight="700" fill="#ffffff">TO LEAVE</text></svg>`;
 const UNAVAILABLE_IMAGE = `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144"><rect width="144" height="144" rx="22" fill="#24262b"/><circle cx="72" cy="72" r="42" fill="none" stroke="#777b84" stroke-width="9"/><path d="M42 102L102 42" stroke="#777b84" stroke-width="10" stroke-linecap="round"/></svg>`;
 
 function keyActionFromEvent(ev: WillAppearEvent | WillDisappearEvent): KeyAction | undefined {
@@ -201,22 +204,74 @@ export class HandAction extends ToggleCallControlAction {
 	protected readonly commands = ["hand-lower", "hand-raise"] as const;
 }
 
+/** Leave runs only after the key has been held this long. A tap never leaves. */
+export const LEAVE_HOLD_MS = 1_500;
+const leaveHold = new HoldGate(LEAVE_HOLD_MS);
+const armedLeaveKeys = new Map<string, KeyAction>();
+
+function disarmLeave(context: string): boolean {
+	const actionInstance = armedLeaveKeys.get(context);
+	armedLeaveKeys.delete(context);
+	const cancelled = leaveHold.release(context) === "cancelled";
+	if (actionInstance) void actionInstance.setImage().catch(() => undefined);
+	return cancelled;
+}
+
+/** Disarms any pending Leave and restores its key image, for device disconnect and system wake. */
+export function cancelPendingLeave(): void {
+	for (const context of [...armedLeaveKeys.keys()]) disarmLeave(context);
+	leaveHold.cancelAll();
+}
+
 @action({ UUID: "com.laurens-bolle.teams-reactions.leave" })
 export class LeaveAction extends SingletonAction {
 	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
+		if (ev.payload.isInMultiAction) {
+			streamDeck.logger.warn("Ignored leave inside a multi-action because Leave requires a held key.");
+			await ev.action.showAlert();
+			return;
+		}
+		const actionInstance = ev.action;
+		const armed = leaveHold.press(actionInstance.id, () => {
+			armedLeaveKeys.delete(actionInstance.id);
+			void this.leave(actionInstance);
+		});
+		if (!armed) return;
+		armedLeaveKeys.set(actionInstance.id, actionInstance);
+		await actionInstance.setImage(LEAVE_ARMED_IMAGE);
+	}
+
+	override async onKeyUp(ev: KeyUpEvent): Promise<void> {
+		if (!disarmLeave(ev.action.id)) return;
+		streamDeck.logger.info(`Leave cancelled: the key was released before ${LEAVE_HOLD_MS} ms.`);
+		await ev.action.showAlert();
+	}
+
+	override async onWillAppear(ev: WillAppearEvent): Promise<void> {
+		// Clears a stale armed image left by a reload or a missed key-up.
+		const actionInstance = keyActionFromEvent(ev);
+		if (actionInstance) await actionInstance.setImage();
+	}
+
+	override onWillDisappear(ev: WillDisappearEvent): void {
+		disarmLeave(ev.action.id);
+	}
+
+	private async leave(actionInstance: KeyAction): Promise<void> {
+		await actionInstance.setImage();
 		try {
 			const execution = await commandCoordinator.execute("leave");
 			if (execution.status === "busy") {
 				streamDeck.logger.warn("Ignored leave because another Teams operation is running.");
-				await ev.action.showAlert();
+				await actionInstance.showAlert();
 				return;
 			}
 			await stateSynchronizer.apply(execution.result);
 			streamDeck.logger.info("Teams meeting leave completed.");
-			await ev.action.showOk();
+			await actionInstance.showOk();
 		} catch (error) {
 			logHelperError("Teams command leave", error);
-			await ev.action.showAlert();
+			await actionInstance.showAlert();
 		}
 	}
 }
