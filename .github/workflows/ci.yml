@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and pack
+    # The native helper and its tests need xcrun, clang and codesign.
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: teams-reactions
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: teams-reactions/package-lock.json
+      - name: Install dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+      # Unit and native scoring tests use fixtures. Live Teams behaviour needs a
+      # real meeting and Accessibility permission, so it cannot run here.
+      - name: Test
+        run: npm test
+      - name: Pack
+        run: npm run pack
+      - name: Validate plugin bundle
+        run: npm run validate
+      # The path is relative to the repository root: working-directory does not
+      # apply to uses: steps.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: teams-meeting-controls-plugin
+          path: teams-reactions/release/*.streamDeckPlugin
+          retention-days: 14
+          if-no-files-found: error
+
+  codeql:
+    name: CodeQL (TypeScript)
+    # Covers the TypeScript plugin only. CodeQL Objective-C support is unverified,
+    # so TeamsReactionPOC.m is reviewed by hand.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+
+  dependency-review:
+    name: Dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
