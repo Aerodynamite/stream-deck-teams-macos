@@ -13,6 +13,7 @@ import {
 	HandAction,
 	LeaveAction,
 	MuteAction,
+	cancelPendingLeave,
 	stateSynchronizer,
 } from "./actions/call-controls";
 import { persistentControls, reactionBurstCoordinator } from "./teams-services";
@@ -30,12 +31,14 @@ streamDeck.actions.registerAction(new HandAction());
 streamDeck.actions.registerAction(new LeaveAction());
 
 streamDeck.devices.onDeviceDidDisconnect(ev => {
+	cancelPendingLeave();
 	reactionBurstCoordinator.stopAll();
 	stateSynchronizer.disconnectDevice(ev.device.id);
 	if (!stateSynchronizer.hasVisibleControls) persistentControls.stop();
 });
 streamDeck.system.onApplicationDidTerminate(() => reactionBurstCoordinator.stopAll());
 streamDeck.system.onSystemDidWakeUp(() => {
+	cancelPendingLeave();
 	persistentControls.invalidate();
 	if (stateSynchronizer.hasVisibleControls) void stateSynchronizer.refresh().catch(() => streamDeck.logger.warn("Teams state refresh after wake failed."));
 });

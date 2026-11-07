@@ -2,6 +2,7 @@ import streamDeck, {
 	action,
 	type KeyAction,
 	type KeyDownEvent,
+	type KeyUpEvent,
 	type State,
 	SingletonAction,
 	type WillAppearEvent,
@@ -13,6 +14,8 @@ import {
 	type TeamsCommand,
 	type TeamsState,
 } from "../helper-runner";
+import { HoldGate } from "../hold-gate";
+import { LEAVE_HOLD_MS, LeaveController } from "../leave-controller";
 import { commandCoordinator, operationLock, persistentControls } from "../teams-services";
 
 type StateField = "microphone" | "camera" | "hand";
@@ -201,22 +204,39 @@ export class HandAction extends ToggleCallControlAction {
 	protected readonly commands = ["hand-lower", "hand-raise"] as const;
 }
 
+async function executeLeave(): Promise<{ status: "completed" | "busy" }> {
+	const execution = await commandCoordinator.execute("leave");
+	if (execution.status === "completed") await stateSynchronizer.apply(execution.result);
+	return { status: execution.status };
+}
+
+const leaveController = new LeaveController(executeLeave, {
+	info: message => streamDeck.logger.info(message),
+	warn: message => streamDeck.logger.warn(message),
+	reportError: logHelperError,
+}, new HoldGate(LEAVE_HOLD_MS));
+
+/** Disarms any pending Leave and restores its key image, for device disconnect and system wake. */
+export function cancelPendingLeave(): void {
+	leaveController.cancelAll();
+}
+
 @action({ UUID: "com.laurens-bolle.teams-reactions.leave" })
 export class LeaveAction extends SingletonAction {
-	override async onKeyDown(ev: KeyDownEvent): Promise<void> {
-		try {
-			const execution = await commandCoordinator.execute("leave");
-			if (execution.status === "busy") {
-				streamDeck.logger.warn("Ignored leave because another Teams operation is running.");
-				await ev.action.showAlert();
-				return;
-			}
-			await stateSynchronizer.apply(execution.result);
-			streamDeck.logger.info("Teams meeting leave completed.");
-			await ev.action.showOk();
-		} catch (error) {
-			logHelperError("Teams command leave", error);
-			await ev.action.showAlert();
-		}
+	override onKeyDown(ev: KeyDownEvent): Promise<void> {
+		return leaveController.keyDown(ev.action, ev.payload.isInMultiAction);
+	}
+
+	override onKeyUp(ev: KeyUpEvent): Promise<void> {
+		return leaveController.keyUp(ev.action);
+	}
+
+	override async onWillAppear(ev: WillAppearEvent): Promise<void> {
+		const actionInstance = keyActionFromEvent(ev);
+		if (actionInstance) await leaveController.appear(actionInstance);
+	}
+
+	override onWillDisappear(ev: WillDisappearEvent): void {
+		leaveController.disappear(ev.action.id);
 	}
 }
